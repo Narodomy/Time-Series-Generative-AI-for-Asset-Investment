@@ -1,2 +1,16 @@
 # Time-Series-Generative-AI-for-Asset-Investment
 Thesis project repository: Generative AI for time-series asset price simulation and investment strategy exploration.
+Abstract 
+A Fundamental challenge in investment risk management is that observed asset prices capture a 
+single historical realization. This reliance on a single historical trajectory limits risk analysis, as it 
+cannot capture uncertainty or account for situations that have never occurred before. Real-world 
+examples such as Zillow Offers and Opendoor highlight the limitation of models in capturing anything 
+beyond a single historical asset price trajectory. This research applies Generative AI to simulate 
+synthetic asset price trajectories, with underlying contexts that include macroeconomic conditions, 
+financial statements, historical prices, and news sentiment. The main objective is to construct 
+scenarios that reflect the inherent uncertainty and volatility of financial markets. Intrinsic asset values 
+are derived from fundamental data and then compared with observed prices to capture deviations 
+driven by behavioral factors. Monte Carlo Simulation is employed to model distributions of potential 
+intrinsic value paths, capturing uncertainty that extends beyond historical records. By integrating 
+both fundamental and behavioral perspectives, the framework produces diverse and realistic 
+datasets that enhance risk assessment and support more adaptive investment strategies.
