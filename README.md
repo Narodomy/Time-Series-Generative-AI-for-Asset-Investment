@@ -14,3 +14,33 @@ driven by behavioral factors. Monte Carlo Simulation is employed to model distri
 intrinsic value paths, capturing uncertainty that extends beyond historical records. By integrating 
 both fundamental and behavioral perspectives, the framework produces diverse and realistic 
 datasets that enhance risk assessment and support more adaptive investment strategies.
+
+🚀 Installation
+You can set up the project environment using one of the two methods below. Method 1 (Conda) is recommended for better dependency management and reproducibility.
+
+1. (Recommended) Using Conda
+This method creates a complete, isolated environment using the exact package versions specified, including Python itself.
+
+Bash
+
+# 1. Create the new environment from the .yml file
+conda env create -f my_data_env.yml
+
+# 2. Activate the new environment
+conda activate my_data_env
+2. Using Pip
+This method is suitable if you are not using Conda. It is highly recommended to use a virtual environment.
+
+Bash
+
+# 1. (Optional but recommended) Create a virtual environment
+python -m venv venv
+
+# 2. (Optional but recommended) Activate the virtual environment
+# On macOS/Linux
+source venv/bin/activate
+# On Windows
+.\venv\Scripts\activate
+
+# 3. Install the required packages
+pip install -r requirements.txt
