@@ -15,3 +15,12 @@ PROCESSED_DIR = DATA_DIR / "processed"
 SRC_DIR = ROOT / "src"
 MODELS_DIR = ROOT / "models"
 REPORTS_DIR = ROOT / "reports"
+
+
+# Raw data directory paths
+# |_ equity
+# |_ economic
+# |_ futures
+EQUITY_DIR = RAW_DIR / "equity"
+ECONOMIC_DIR = RAW_DIR / "economic"
+FUTURES_DIR = RAW_DIR / "futures"
