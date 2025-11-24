@@ -14,6 +14,7 @@ plotly==6.3.0
 statsmodels==0.14.5
 yfinance==0.2.65
 quantstats==0.0.77
+pyportfolioppt
 
 # Web & Utilities
 requests==2.32.5

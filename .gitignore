@@ -13,6 +13,7 @@ env/
 # Editable install metadata
 *.egg-info/
 *.egg
+src/*.egg-info/
 
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/
@@ -25,3 +26,19 @@ env/
 
 # Data (ใหญ่ / generated)
 data/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+.installed.cfg
+
+notebooks/trained_models/
+notebooks/results/
