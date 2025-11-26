@@ -3,12 +3,19 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# Input Channels (c_in) = Input Features from original is RGB so c_in = 3 but we have 2 features Close price and Volume therefore c_in = 2
-# Output Channels (c_out) = Output Features same as Input Channels (c_in)
-# Time Embedding Dimension (time_dim) = timestep in Diffusion Model
-# note __init__ = blueprint define the nn first and not yet active until call -> forward function in the class
-# channels = nums of feature
-# shape of x = [B,C,H,W] in image case but our project is [B,C,L]
+""" 
+    Input Channels (c_in) = Input Features from original is RGB so c_in = 3 but we have 2 features Close price and Volume therefore c_in = 2
+    Output Channels (c_out) = Output Features same as Input Channels (c_in)
+    Time Embedding Dimension (time_dim) = timestep in Diffusion Model
+    note __init__ = blueprint define the nn first and not yet active until call -> forward function in the class
+    channels = nums of feature
+    shape of x = [B,C,H,W] in image case but our project is [B,C,L]
+"""
+
+"""
+!!! Important Note !!! 
+change shape from [B, C, L] to [B, L ,C] -> so this file must permute be permute(0, 2, 1)
+"""
 class SelfAttention(nn.Module):
     def __init__(self, channels):
         # super(SelfAttention, self).__init__() # -> old version
@@ -130,6 +137,7 @@ class Up(nn.Module):
 class UNet(nn.Module):
     def __init__(self, c_in=3, c_out=3, time_dim=256, device="cuda"):
         super().__init__()
+        self.name = "unet"
         self.device = device
         self.time_dim = time_dim
         self.inc = DoubleConv(c_in, 64)
@@ -170,29 +178,28 @@ class UNet(nn.Module):
         return pos_enc
 
     def forward(self, x, t):
-        # t arrives as a 1D tensor (a "vector") of timesteps, one for each sample in the batch.
-        # It is NOT a single number (scalar) and NOT the final 256-dim vector yet.
-        # e.g., if Batch Size (B) = 4, t might be: 
-        #       tensor([150, 50, 800, 150])
-        #       Shape: [B] or [4]
+        """  t arrives as a 1D tensor (a "vector") of timesteps, one for each sample in the batch.
+             It is NOT a single number (scalar) and NOT the final 256-dim vector yet.
+             e.g., if Batch Size (B) = 4, t might be: 
+                  tensor([150, 50, 800, 150])
+                   Shape: [B] or [4]
         
-        # 1. "Prep" the timestep tensor 't'.
-        #    .type(torch.float): PE algorithms (sin/cos) require floats, not ints (e.g., 150 -> 150.0).
-        #    .unsqueeze(-1):  The PE function expects a 2D input [B, 1]. This adds a dummy dimension
-        #                     at the end.
-        # e.g., t shape is now: [B, 1] or [4, 1]
-        #       t is now: tensor([[150.0],
-        #                        [ 50.0],
-        #                        [800.0],
-        #                        [150.0]])
+             1. "Prep" the timestep tensor 't'.
+                .type(torch.float): PE algorithms (sin/cos) require floats, not ints (e.g., 150 -> 150.0).
+                .unsqueeze(-1):  The PE function expects a 2D input [B, 1]. This adds a dummy dimension at the end.
+             e.g., t shape is now: [B, 1] or [4, 1]
+                   t is now: tensor([[150.0], [ 50.0],[800.0], [150.0]])
+        """
+        x = x.permute(0, 2, 1)
         t = t.unsqueeze(-1).type(torch.float)
-        # 2. "Process" t into the final 't_vector' (the "smart" signature vector).
-        #    self.pos_encoding expands the last dimension (from 1) to time_dim (e.g., 256).
-        # e.g., Final t shape: [B, time_dim] or [4, 256]
-        #       t is now: tensor([[-0.8, 0.1, ..., 0.5],  # Signature for t=150
-        #                       [ 0.2, 0.9, ..., -0.3], # Signature for t=50
-        #                       [ 0.7, -0.4, ..., 0.1], # Signature for t=800
-        #                       [-0.8, 0.1, ..., 0.5]]) # Signature for t=150 (again)
+        """ 2. "Process" t into the final 't_vector' (the "smart" signature vector).
+            self.pos_encoding expands the last dimension (from 1) to time_dim (e.g., 256).
+             e.g., Final t shape: [B, time_dim] or [4, 256]
+             t is now: tensor([[-0.8, 0.1, ..., 0.5],  # Signature for t=150
+                               [ 0.2, 0.9, ..., -0.3], # Signature for t=50
+                               [ 0.7, -0.4, ..., 0.1], # Signature for t=800
+                               [-0.8, 0.1, ..., 0.5]]) # Signature for t=150 (again)
+        """
         t = self.pos_encoding(t, self.time_dim)
 
         x1 = self.inc(x)
@@ -220,4 +227,5 @@ class UNet(nn.Module):
         x = self.sa6(x)
 
         output = self.outc(x)
+        output = output.permute(0, 2, 1)
         return output

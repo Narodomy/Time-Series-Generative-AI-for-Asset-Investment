@@ -1,8 +1,66 @@
 import os
+import re
 import torch
-
+from datetime import datetime
 from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader
+from utils.paths import CHECKPOINTS_DIR
+
+def save_model(
+    model: torch.nn.Module, 
+    optimizer: torch.optim.Optimizer,
+    epoch: int,
+    loss: float,
+    # 🟢 เพิ่ม Arguments ใหม่
+    framework_name: str = "ddpm", 
+    model_name: str = "unet",
+    # 🟢 เปลี่ยน save_dir เป็น root เพื่อให้ยืดหยุ่น
+    root_dir: str = CHECKPOINTS_DIR,
+    loss_history: list = None
+):
+    """
+    บันทึก Model, Optimizer ภายใต้โครงสร้าง: {root_dir}/{framework_name}/{model_name}/{epoch}_{date}.pt
+    """
+    
+    # 1. กำหนด Path ของ Directory
+    # เช่น "checkpoints/ddpm/unet"
+    target_dir = os.path.join(root_dir)
+    
+    # 2. ตรวจสอบและสร้าง Directory (Recursive)
+    os.makedirs(target_dir, exist_ok=True)
+    
+    # 3. กำหนดชื่อไฟล์
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # ชื่อไฟล์: 0050_20251126_212030.pt
+    file_name = f"{framework_name}_{model_name}_{epoch:04d}_{timestamp}.pt" 
+    save_path = os.path.join(target_dir, file_name)
+    
+    # 4. เตรียมข้อมูลที่จะบันทึก (Checkpoint Dictionary)
+    checkpoint = {
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'loss': loss,
+        'timestamp': timestamp,
+        'framework': framework_name,
+        'model_architecture': model_name
+    }
+    if loss_history is not None:
+        checkpoint['loss_history'] = loss_history
+    # 5. บันทึก
+    torch.save(checkpoint, save_path)
+    print(f"✅ Checkpoint saved successfully to: {save_path}")
+
+def load_checkpoint(path: str):
+    """
+    โหลด Checkpoint จาก Path ที่กำหนด และคืนค่า Dictionary ทั้งหมด
+    """
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Checkpoint not found at: {path}")
+        
+    checkpoint = torch.load(path)
+    return checkpoint
+
 
 def save_time_series_plots(sampled_data, path, num_plots=4, channels_to_plot=[0, 1], figsize=(12, 8)):
     """
@@ -50,6 +108,48 @@ def save_time_series_plots(sampled_data, path, num_plots=4, channels_to_plot=[0,
     plt.close(fig)     # ปิด Figure เพื่อเคลียร์ Memory
     
     # logging.info(f"Saved {num_plots} time series plots to {path}")
+
+
+
+def get_next_version_num(
+    framework_name: str, 
+    model_name: str, 
+    root_dir: str
+) -> int:
+    """
+    ตรวจสอบไฟล์ Checkpoint ที่มีอยู่แล้ว และคืนค่าหมายเลขเวอร์ชันถัดไป
+    (เช่น ถ้ามี v1, v2 อยู่แล้ว จะคืนค่า 3)
+    """
+    target_dir = os.path.join(root_dir, framework_name, model_name)
+    
+    if not os.path.exists(target_dir):
+        # ถ้า Folder ไม่มีเลย เริ่มที่ v1
+        return 1
+    
+    max_version = 0
+    # Pattern ที่ใช้ค้นหาไฟล์: ต้องมี 'v' ตามด้วยเลข (1-999) แล้วตามด้วย '_'
+    # เช่น 'v1_0001_2025...' หรือ 'v10_0001...'
+    pattern = re.compile(r"v(\d+)_") 
+    
+    # วนลูปดูทุกไฟล์ใน Directory
+    for filename in os.listdir(target_dir):
+        match = pattern.match(filename)
+        if match:
+            # ดึงเลขเวอร์ชันออกมา (group(1)) แล้วแปลงเป็น int
+            current_version = int(match.group(1))
+            if current_version > max_version:
+                max_version = current_version
+                
+    # คืนค่า = เลขเวอร์ชันสูงสุดที่เจอ + 1 (หรือ 1 ถ้าไม่เจอเลย)
+    return max_version + 1
+
+
+
+
+
+
+
+
 
 def save_loss_plot(loss_history, path, total_epochs, y_axis_max, y_axis_min, figsize=(10, 5)):
     """

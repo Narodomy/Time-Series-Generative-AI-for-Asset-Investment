@@ -42,3 +42,5 @@ wheels/
 
 notebooks/trained_models/
 notebooks/results/
+
+results/

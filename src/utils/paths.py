@@ -24,3 +24,6 @@ REPORTS_DIR = ROOT / "reports"
 EQUITY_DIR = RAW_DIR / "equity"
 ECONOMIC_DIR = RAW_DIR / "economic"
 FUTURES_DIR = RAW_DIR / "futures"
+
+RESULTS_DIR = ROOT / "results"
+CHECKPOINTS_DIR = RESULTS_DIR / "checkpoints"
