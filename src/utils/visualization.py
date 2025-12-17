@@ -1,6 +1,116 @@
 import matplotlib.pyplot as plt
-import torch
+import seaborn as sns
 import numpy as np
+
+from pathlib import Path
+from sklearn.decomposition import PCA
+from statsmodels.tsa.stattools import acf
+
+def save_current_plot(filename, save_dir):
+    """Function that helps to save current graph."""
+    if save_dir:
+        # แปลงเป็น Path object กันเหนียว
+        save_path = Path(save_dir) / filename
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Saved: {save_path}")
+
+def plot_loss_comparison(history_dict, save_dir=None):
+    """พล็อตกราฟ Loss รวมของทุกโมเดล"""
+    plt.figure(figsize=(10, 6))
+    for name, loss_data in history_dict.items():
+        plt.plot(loss_data, label=name)
+    
+    plt.title("Training Loss Comparison")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    if save_dir:
+        save_current_plot("loss_comparison.png", save_dir)
+    
+    plt.show()
+
+def plot_time_series(x_real, x_fake, model_name, feature_idx=0, save_dir=None):
+    plt.figure(figsize=(10, 5))
+    plt.plot(x_real[0, :, feature_idx], label="Real", color="blue", alpha=0.7)
+    plt.plot(x_fake[0, :, feature_idx], label="Synthetic", color="red", alpha=0.7)
+    plt.title(f"Time Series: Real vs {model_name}")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    if save_dir:
+        save_current_plot(f"{model_name}_timeseries.png", save_dir)
+    
+    plt.show()
+
+def plot_distribution(x_real, x_fake, model_name, feature_idx=0, save_dir=None):
+    plt.figure(figsize=(10, 5))
+    sns.kdeplot(x_real[:, :, feature_idx].flatten(), color="blue", label="Real", fill=True, alpha=0.3)
+    sns.kdeplot(x_fake[:, :, feature_idx].flatten(), color="red", label="Synthetic", fill=True, alpha=0.3)
+    plt.title(f"Distribution (KDE): Real vs {model_name}")
+    plt.legend()
+    
+    if save_dir:
+        save_current_plot(f"{model_name}_distribution.png", save_dir)
+    
+    plt.show()
+
+def plot_pca(x_real, x_fake, model_name, save_dir=None):
+    real_flat = x_real.reshape(x_real.shape[0], -1)
+    fake_flat = x_fake.reshape(x_fake.shape[0], -1)
+    
+    pca = PCA(n_components=2)
+    pca.fit(real_flat)
+    r_pca = pca.transform(real_flat)
+    f_pca = pca.transform(fake_flat)
+    
+    plt.figure(figsize=(8, 6))
+    plt.scatter(r_pca[:, 0], r_pca[:, 1], label="Real", alpha=0.5, color="blue")
+    plt.scatter(f_pca[:, 0], f_pca[:, 1], label="Synthetic", alpha=0.5, color="red")
+    plt.title(f"PCA: Real vs {model_name}")
+    plt.legend()
+    
+    if save_dir:
+        save_current_plot(f"{model_name}_pca.png", save_dir)
+    
+    plt.show()
+
+def _compute_avg_acf(data, steps=20, feature_idx=0):
+    acfs = []
+    for i in range(len(data)):
+        try:
+            stat = acf(data[i, :, feature_idx], nlags=steps, fft=True)
+            acfs.append(stat)
+        except:
+            pass # if there have errors
+    return np.mean(acfs, axis=0) if acfs else np.zeros(steps+1)
+
+def plot_acf(x_real, x_fake, model_name, save_dir=None):
+    real_acf = _compute_avg_acf(x_real)
+    fake_acf = _compute_avg_acf(x_fake)
+    
+    plt.figure(figsize=(8, 4))
+    plt.plot(real_acf, label="Real ACF", marker='o', color="blue")
+    plt.plot(fake_acf, label="Synthetic ACF", marker='x', linestyle='--', color="red")
+    plt.title(f"ACF: Real vs {model_name}")
+    plt.legend()
+    plt.grid(True)
+    
+    if save_dir:
+        save_current_plot(f"{model_name}_acf.png", save_dir)
+        
+    plt.show()
+
+def visualize_all(x_real, x_fake, model_name, save_dir=None):
+    """เรียกทีเดียว Save ครบทุกรูป โดยแปะชื่อ Model ไว้หน้าไฟล์"""
+    print(f"Visualizing & Saving for {model_name}...")
+    
+    plot_time_series(x_real, x_fake, model_name, save_dir=save_dir)
+    plot_distribution(x_real, x_fake, model_name, save_dir=save_dir)
+    plot_pca(x_real, x_fake, model_name, save_dir=save_dir)
+    plot_acf(x_real, x_fake, model_name, save_dir=save_dir)
+
 
 def plot_comparison(dataloader, model, diffusion, scaler, dataset, device="cuda"):
     """

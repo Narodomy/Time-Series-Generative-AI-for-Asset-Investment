@@ -27,3 +27,4 @@ FUTURES_DIR = RAW_DIR / "futures"
 
 RESULTS_DIR = ROOT / "results"
 CHECKPOINTS_DIR = RESULTS_DIR / "checkpoints"
+VISUALIZATION_DIR = RESULTS_DIR / "visualization"
