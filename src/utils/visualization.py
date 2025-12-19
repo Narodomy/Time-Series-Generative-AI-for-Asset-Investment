@@ -31,6 +31,13 @@ def plot_loss_comparison(history_dict, save_dir=None):
     
     plt.show()
 
+def plot_series(x, label="Series", color="blue", title="Series"):
+    plt.figure(figsize=(10, 5))
+    plt.plot(x, label=label, color=color, alpha=0.7)
+    plt.title(title)
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+
 def plot_time_series(x_real, x_fake, model_name, feature_idx=0, save_dir=None):
     plt.figure(figsize=(10, 5))
     plt.plot(x_real[0, :, feature_idx], label="Real", color="blue", alpha=0.7)
@@ -43,6 +50,30 @@ def plot_time_series(x_real, x_fake, model_name, feature_idx=0, save_dir=None):
         save_current_plot(f"{model_name}_timeseries.png", save_dir)
     
     plt.show()
+
+def plot_projection(past, future, col=0, title="Series Projection"):
+    plt.figure(figsize=(10, 5))
+    """ Slice only column """
+    y_past = past[:, col]
+    y_future = future[:, col]
+
+    """ Auto-generate X axis """
+    x_past = np.arange(len(y_past))
+    x_future = np.arange(len(y_past), len(y_past) + len(y_future))
+
+    """ Plotting """
+    plt.plot(x_past, y_past, label="Past", color="#1f77b4")
+
+    plot_x_future = np.concatenate(([x_past[-1]], x_future))
+    plot_y_future = np.concatenate(([y_past[-1]], y_future))
+
+    plt.plot(plot_x_future, plot_y_future, label="Projection", color="#ff7f0e")
+    # """ Connection line """
+    # plt.plot([x_past[-1], x_future[0]], [y_past[-1], y_future[0]], color='gray', linestyle=':', alpha=0.5)
+    
+    plt.title(title)
+    plt.legend()
+    plt.grid(True, alpha=0.2)
 
 def plot_distribution(x_real, x_fake, model_name, feature_idx=0, save_dir=None):
     plt.figure(figsize=(10, 5))
@@ -111,6 +142,50 @@ def visualize_all(x_real, x_fake, model_name, save_dir=None):
     plot_pca(x_real, x_fake, model_name, save_dir=save_dir)
     plot_acf(x_real, x_fake, model_name, save_dir=save_dir)
 
+
+def plot_monte_carlo(history, scenarios, feature_idx=0):
+    """
+    history: ข้อมูลอดีต (48, 2)
+    scenarios: ผล Monte Carlo (50, 16, 2)
+    """
+    plt.figure(figsize=(10, 5))
+    
+    # 1. เตรียมข้อมูล
+    hist_data = history[:, feature_idx]
+    
+    # สร้างแกน X
+    hist_x = range(len(hist_data))
+    pred_x = range(len(hist_data), len(hist_data) + scenarios.shape[1])
+    
+    # เตรียมพิกัดจุดเชื่อม (จุดสุดท้ายของ History)
+    last_hist_x = hist_x[-1]
+    last_hist_y = hist_data[-1]
+    first_pred_x = pred_x[0] # จุดเริ่มของ Forecast
+    
+    # 2. วาดเส้น Monte Carlo และเส้นเชื่อม
+    for i in range(scenarios.shape[0]):
+        # 2.1 วาดเส้น Forecast (สีแดงจางๆ เหมือนเดิม)
+        plt.plot(pred_x, scenarios[i, :, feature_idx], color='red', alpha=0.3)
+        
+        # 2.2 [ส่วนที่เพิ่ม] วาดเส้นเชื่อมสีเทา (Bridge)
+        # ลากจาก (จุดท้าย History) -> (จุดแรกของ Forecast เส้นนี้)
+        first_scen_y = scenarios[i, 0, feature_idx]
+        plt.plot([last_hist_x, first_pred_x], [last_hist_y, first_scen_y], color='red', alpha=0.1)
+        
+    # 3. วาดเส้น History (ของจริง)
+    plt.plot(hist_x, hist_data, label="History", color='blue', linewidth=2)
+    
+    # (Optional) วาดเส้นค่าเฉลี่ย
+    mean_scenario = np.mean(scenarios[:, :, feature_idx], axis=0)
+    plt.plot(pred_x, mean_scenario, label="Mean Forecast", color='darkred', linestyle='--', linewidth=2)
+    
+    # เชื่อมเส้นค่าเฉลี่ยด้วย (เพื่อให้ดูเนียนเหมือนกัน)
+    plt.plot([last_hist_x, first_pred_x], [last_hist_y, mean_scenario[0]], color='gray', linestyle='--', alpha=0.5)
+
+    plt.title(f"Monte Carlo Simulation (Feature {feature_idx})")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.show()
 
 def plot_comparison(dataloader, model, diffusion, scaler, dataset, device="cuda"):
     """

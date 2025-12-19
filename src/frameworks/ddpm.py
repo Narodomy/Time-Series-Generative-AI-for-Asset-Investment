@@ -103,22 +103,24 @@ class Diffusion:
         if len(hist_series) < n_req_hist:
             raise ValueError(f"History data too short! Need {req_hist} steps.")
         """ Get only necessary part of data """
-        hist_part = hist_series[-n_req_hist:].values
+        hist_part = hist_series[-n_req_hist:]
         """ 
             Convert them to tensor, Create new mask 
             Shape [1, Hist, Channels]
         """
         x_known = torch.tensor(hist_part, dtype=torch.float32).unsqueeze(0).to(self.device) 
-        mask = self.create_inpainting_mask(batch_size=1, known_length=hist_part)
+        mask = self.create_inpainting_mask(batch_size=1, known_length=len(hist_part))
 
         with torch.no_grad():
             """ Start with Radom Noise on linear """
             x = torch.randn((1, self.length, self.channels)).to(self.device)
 
-            for i in tdqm(reversed(range(1, self.noise_steps)), postion=0):
+            for i in tqdm(reversed(range(0, self.noise_steps)), position=0):
                 t = (torch.ones(1) * i).long().to(self.device)
 
                 """ Denoise Step """
+                alpha = self.alpha[t][:, None, None]
+                alpha_hat = self.alpha_hat[t][:, None, None]
                 predicted_noise = model(x, t)
                 
                 if i > 1:
@@ -137,7 +139,7 @@ class Diffusion:
                     """ Random Noise """
                     noise_known = torch.randn_like(full_known_frame)
                     """ Follow Forward Process Step of Diffusion """
-                    known_noisy = torch.sqrt(alpha_hat) * full_known_frame + torch.sqrt(1 - alpha_hat) * noise_for_known
+                    known_noisy = torch.sqrt(alpha_hat) * full_known_frame + torch.sqrt(1 - alpha_hat) * noise_known
                     """ 
                         Reference: https://arxiv.org/pdf/2201.09865
                         RePaint: Inpainting using Denoising Diffusion Probabilistic Models 
