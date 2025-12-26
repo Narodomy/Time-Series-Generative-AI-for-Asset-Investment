@@ -1,6 +1,8 @@
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 import seaborn as sns
 import numpy as np
+import pandas as pd
 
 from pathlib import Path
 from sklearn.decomposition import PCA
@@ -256,3 +258,209 @@ def plot_comparison(dataloader, model, diffusion, scaler, dataset, device="cuda"
     plt.show()
     
     model.train() # อย่าลืมสับสวิตช์กลับเป็น Train เผื่อเรียกใช้ระหว่างเทรน
+
+
+# ==========================================
+# Helper Functions
+# ==========================================
+
+def _get_display_info(dataset, feature):
+    """ช่วยเช็คว่าเปิดโหมด Log Return ไหม ถ้าใช่ให้เปลี่ยนชื่อและคืนค่า Flag"""
+    use_log = getattr(dataset, 'use_log_return', False)
+    log_feats = getattr(dataset, 'log_return_features', None)
+    
+    # ถ้า log_return_features เป็น None แล้ว use_log=True แปลว่าทำทุกตัว หรือทำ Close เป็น Default
+    # แต่ใน code Dataset คุณ default คือ ['Close'] ดังนั้นเช็คให้ชัวร์
+    if use_log:
+        if log_feats is None:
+            is_log = (feature == 'Close') # Default behavior
+        else:
+            is_log = (feature in log_feats)
+    else:
+        is_log = False
+    
+    name = f"{feature} (Log Return)" if is_log else feature
+    return name, is_log
+
+def _prepare_single_data(dataset, feature):
+    """ดึงข้อมูลดิบและวันที่จาก TimeSeriesDataset"""
+    if feature not in dataset.features:
+        print(f"Error: Feature {feature} not found.")
+        return None, None
+        
+    feat_idx = dataset.features.index(feature)
+    values = dataset.raw_values[:, feat_idx]
+    
+    if hasattr(dataset, 'dates'):
+        dates = pd.to_datetime(dataset.dates)
+    else:
+        dates = np.arange(len(values))
+        
+    return dates, values
+
+# ==========================================
+# 1. Single Asset Functions (TimeSeriesDataset)
+# ==========================================
+
+def viz_single_timeline(dataset, start_idx, feature):
+    """Plot ยาวจนจบ (Start -> End)"""
+    dates, values = _prepare_single_data(dataset, feature)
+    if dates is None: return
+
+    # ตัดข้อมูลตั้งแต่ start_idx จนจบ
+    plot_dates = dates[start_idx:]
+    plot_values = values[start_idx:]
+    
+    label_name, is_log = _get_display_info(dataset, feature)
+
+    plt.figure(figsize=(12, 6))
+    plt.plot(plot_dates, plot_values, label=label_name, linewidth=1.5)
+    
+    plt.title(f"Timeline View: {label_name} (Start Idx: {start_idx})")
+    plt.ylabel(label_name)
+    plt.grid(True, alpha=0.3)
+    if is_log: plt.axhline(0, color='black', linestyle='--', alpha=0.7)
+    
+    # Format Date
+    if len(plot_dates) > 0 and isinstance(plot_dates[0], pd.Timestamp):
+        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+        plt.gcf().autofmt_xdate()
+        
+    plt.legend()
+    plt.show()
+
+def viz_single_window(dataset, start_idx, feature):
+    """Plot เฉพาะใน Window (Start -> Start + Window)"""
+    dates, values = _prepare_single_data(dataset, feature)
+    if dates is None: return
+    
+    window_size = dataset.window_size
+    # Logic Forward: เริ่มที่ start_idx ไปอีก window_size
+    end_idx = start_idx + window_size
+    
+    # ป้องกัน Index เกิน
+    actual_end_idx = min(end_idx, len(values))
+    
+    plot_dates = dates[start_idx : actual_end_idx]
+    plot_values = values[start_idx : actual_end_idx]
+    
+    label_name, is_log = _get_display_info(dataset, feature)
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(plot_dates, plot_values, label=label_name, marker='.', markersize=5)
+    
+    # Fix แกน X ให้โชว์วันที่แบบ Forward
+    if len(plot_dates) > 0 and isinstance(plot_dates[0], pd.Timestamp):
+        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+        plt.gcf().autofmt_xdate()
+
+    plt.title(f"Window View ({window_size} steps): {label_name} | Start Idx: {start_idx}")
+    plt.ylabel(label_name)
+    plt.grid(True, alpha=0.3)
+    if is_log: plt.axhline(0, color='black', linestyle='--', alpha=0.7)
+    
+    plt.legend()
+    plt.show()
+
+
+# ==========================================
+# 2. Portfolio/Group Functions (PortfolioDataset)
+# ==========================================
+
+def viz_group_timeline(portfolio_ds, start_idx, feature):
+    """Plot ทุกตัวพร้อมกัน แบบ Timeline ยาว (Start Date -> End)"""
+    # 1. หาวันที่เริ่มต้นจาก Basket Index
+    try:
+        basket_data = portfolio_ds.security_basket_dataset[start_idx]
+        start_date = pd.to_datetime(basket_data['date'])
+    except IndexError:
+        print("Error: Start Index out of range")
+        return
+
+    label_name, is_log = _get_display_info(portfolio_ds, feature)
+    
+    plt.figure(figsize=(14, 7))
+    count = 0
+    
+    # 2. วนลูปทุก Asset
+    for symbol, ts_ds in portfolio_ds.asset_datasets.items():
+        if feature not in ts_ds.features: continue
+            
+        dates, values = _prepare_single_data(ts_ds, feature)
+        
+        # Filter เอาเฉพาะวันที่ >= start_date (เดินหน้า)
+        mask = dates >= start_date
+        if not np.any(mask): continue
+            
+        plt.plot(dates[mask], values[mask], label=symbol, alpha=0.6, linewidth=1)
+        count += 1
+        
+    plt.title(f"Group Timeline: {label_name} | Start Date: {start_date.date()} | N={count}")
+    plt.ylabel(label_name)
+    plt.grid(True, alpha=0.3)
+    if is_log: plt.axhline(0, color='black', linestyle='--', linewidth=1.5)
+    
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+    plt.gcf().autofmt_xdate()
+    
+    if count <= 15: plt.legend(loc='upper left', bbox_to_anchor=(1, 1))
+    plt.tight_layout()
+    plt.show()
+
+def viz_group_window(portfolio_ds, index, feature):
+    """Plot ทุกตัวพร้อมกัน เฉพาะ Window (Forward Looking)"""
+    
+    # 1. หาวันที่ "เริ่มต้น" (Anchor Date)
+    try:
+        basket_data = portfolio_ds.security_basket_dataset[index]
+        start_date = pd.to_datetime(basket_data['date'])
+    except IndexError:
+        print("Error: Start Index out of range")
+        return
+
+    window_size = portfolio_ds.window_size
+    label_name, is_log = _get_display_info(portfolio_ds, feature)
+    
+    plt.figure(figsize=(12, 6))
+    count = 0
+    
+    # 2. วนลูป Asset
+    for symbol, ts_ds in portfolio_ds.asset_datasets.items():
+        if feature not in ts_ds.features: continue
+        
+        # หาตำแหน่งวันที่ "เริ่มต้น" ใน Asset นั้นๆ
+        if start_date not in portfolio_ds.asset_date_maps[symbol]:
+            continue
+            
+        row_idx = portfolio_ds.asset_date_maps[symbol][start_date]
+        
+        # --- [CRITICAL FIX] Forward Looking Logic ---
+        # Start = row_idx
+        # End   = row_idx + window_size
+        s_idx = row_idx
+        e_idx = row_idx + window_size
+        
+        dates, values = _prepare_single_data(ts_ds, feature)
+        
+        # เช็คว่ามีข้อมูลพอไหม (ถ้าไม่พอ ตัดเท่าที่มี)
+        if s_idx >= len(dates): continue
+        actual_e_idx = min(e_idx, len(dates))
+
+        plot_dates = dates[s_idx : actual_e_idx]
+        plot_values = values[s_idx : actual_e_idx]
+        
+        plt.plot(plot_dates, plot_values, label=symbol, alpha=0.8, marker='.')
+        count += 1
+
+    plt.title(f"Group Window View ({window_size} days): {label_name} | Start Date: {start_date.date()}")
+    plt.ylabel(label_name)
+    plt.grid(True, alpha=0.3)
+    if is_log: plt.axhline(0, color='black', linestyle='--')
+    
+    # Format Date
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+    plt.gcf().autofmt_xdate()
+    
+    if count <= 15: plt.legend(loc='upper left', bbox_to_anchor=(1, 1))
+    plt.tight_layout()
+    plt.show()

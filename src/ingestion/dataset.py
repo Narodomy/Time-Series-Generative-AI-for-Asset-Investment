@@ -5,6 +5,7 @@ import pandas as pd
 
 from .csv_reader import read_equity
 from utils.paths import PRICE_DIR
+from utils import viz_single_timeline, viz_single_window, viz_group_timeline, viz_group_window
 from tqdm import tqdm
 from datetime import date
 from typing import Dict, List, Optional
@@ -15,11 +16,14 @@ class PortfolioDataset(Dataset):
     def __init__(
         self,
         security_basket_dataset: "SecurityBasketDataset",
-        asset_dict: Dict[str, pd.DataFrame], # Raw Data { "AAPL": df, "TSLA": df, ...}
+        assets_dict: Dict[str, pd.DataFrame], # Raw Data { "AAPL": df, "TSLA": df, ...}
         features: Optional[list] = None,
         window_size: int = 64,
         use_timestamp: bool = False,
-        time_col: str = 'Date'
+        use_log_return: bool = False,
+        log_return_features: Optional[list] = None,
+        time_col: str = 'Date',
+        viz_config: dict = None
     ):
         self.security_basket_dataset = security_basket_dataset
         self.window_size = window_size
@@ -32,14 +36,16 @@ class PortfolioDataset(Dataset):
         self.asset_date_maps = {}
 
         print(f"Initializing Portfolio with {len(assets_dict)} assets...")
-        for symbol, df in asset_dict.items():
+        for symbol, df in assets_dict.items():
             ts_ds = TimeSeriesDataset(
                 series=df,
                 features=features,
                 window_size=window_size,
                 use_timestamp=use_timestamp,
                 time_col=time_col,
-                scaler = StandardScaler()
+                scaler = None,
+                use_log_return=use_log_return,
+                log_return_features=log_return_features
             )
             self.asset_datasets[symbol] = ts_ds
 
@@ -53,18 +59,18 @@ class PortfolioDataset(Dataset):
                 self.asset_date_maps[symbol] = { date: i for i, date in enumerate(dates) }
 
     def __len__(self):
-        return self.len(self.security_basket_dataset)
+        return len(self.security_basket_dataset)
 
     def __getitem__(self, idx):
         """ 1. We must know that what date and symbol are in the SecurityBasketDataset """
         security_basket = self.security_basket_dataset[idx]
-        current_date = security_basket["date"]
+        current_date = security_basket["date"] # Start Date
         target_symbols = security_basket["symbols"]
 
         batch_x = []
         batch_x_time = []
-        valid_symbols = [] # Collect only actual Symbol bacause sometime Index has the name but data be lacked 
-
+        valid_symbols = []
+        
         """ 2. Loop each security in the list """
         for symbol in target_symbols:
             if symbol not in self.asset_datasets:
@@ -74,24 +80,18 @@ class PortfolioDataset(Dataset):
 
             # Check current date that what security has ?
             if current_date in date_map: 
-                row_idx_at_date = date_map[current_date]
-
-                """ Logic to Slice the window 
-                    TimeSeriesDataset[i] will pull the time range at [i : i + window_size]
-                    if we want to end data at row_idx_at_date (include that day)
-                    so i + window_size = row_idx_at_date + 1 (because slice not include the last one)
-                    i = row_idx_at_date + 1 - window_size
-                """
-                start_idx = row_idx_at_date - self.window_size + 1
+                row_idx_start = date_map[current_date]
+                start_idx = row_idx_start
                 
-                # if start_idx < 0 means backward data is not enough 
-                if start_idx >= 0: 
+                if start_idx < len(dataset):
                     sample = dataset[start_idx]
                     batch_x.append(sample["x"])
+                    
                     if self.use_timestamp and "x_time" in sample:
                         batch_x_time.append(sample["x_time"])
                         
                     valid_symbols.append(symbol)
+                    
         """ 3. Stack all data in the one tensor """
         if len(batch_x) > 0:
             out_x = torch.stack(batch_x) # Shape: [N assets, Window size, N Features]
@@ -107,7 +107,74 @@ class PortfolioDataset(Dataset):
             return result
         else:
             return None # In case holiday or no data in that day!
+
+    def scan(self):
+        """ Scan: Check all the timeline that what date, ready or skipped? 
+            Return: Daily Status DataFrame
+        """
+        print(f"Scanning dataset ({len(self)} time steps)...")
+        records = []
             
+        for i in tqdm(range(len(self.security_basket_dataset)), desc="Scanning"):
+            basket_data = self.security_basket_dataset[i]
+            current_date = basket_data['date']
+            target_symbols = basket_data['symbols']
+            
+            valid_count = 0
+            for symbol in target_symbols:
+                if symbol not in self.asset_datasets:
+                    continue
+                
+                date_map = self.asset_date_maps[symbol]
+                if current_date in date_map:
+                    row_idx = date_map[current_date]
+                    ts_dataset = self.asset_datasets[symbol]
+                    total_len = len(ts_dataset.dates)
+                    if row_idx + self.window_size <= total_len:
+                        valid_count += 1
+            
+            status = 'Ready' if valid_count > 0 else 'Skipped'
+            records.append({
+                'Index': i,
+                'Date': current_date,
+                'Universe': len(target_symbols),
+                'Assets': valid_count,
+                'Status': status
+            })
+            
+        df = pd.DataFrame(records)
+        
+        ready_count = len(df[df['Status'] == 'Ready'])
+        print(f"\n--- Scan Complete ---")
+        print(f"Total Days: {len(df)}")
+        print(f"Ready:      {ready_count} days")
+        print(f"Skipped:    {len(df) - ready_count} days (Holiday/No Data)")
+        
+        return df
+        
+    def preview(self, idx):
+        print(f"\n--- Preview Index: {idx} ---")
+        basket_data = self.security_basket_dataset[idx]
+        print(f"Date: {basket_data['date'].date()}")
+        print(f"Universe: {len(basket_data['symbols'])} symbols")
+        item = self.__getitem__(idx)
+        
+        if item is None:
+            print("Status: [SKIPPED] (Holiday or insufficient history)")
+        else:
+            print(f"Status: [READY]")
+            print(f"  - Input Shape: {item['x'].shape} (Assets, Window, Features)")
+            if 'symbols' in item:
+                print(f"  - Sample Symbols: {item['symbols'][:3]} ...")
+
+    def plot_all_assets_timeline(self, start_index: int = 0, feature: str = "Close"):
+        """Watch Asset Overview start date at this index """
+        viz_group_timeline(self, start_index, feature)
+
+    def plot_all_assets_window(self, index: int, feature: str = "Close"):
+        """Watch Asset Specific the Window at this index """
+        viz_group_window(self, index, feature)
+        
 class SecurityBasketDataset(Dataset):
     def __init__(self, csv_file, start_date, end_date=date.today(), freq="D"):
         self.n_assets = None
@@ -178,25 +245,54 @@ class TimeSeriesDataset(Dataset):
         scaler: Optional[object] = None,
         window_size: int = 64,  # Length of Window (L channel)
         use_timestamp: bool = False,
+        use_log_return: bool = False,
+        log_return_features: Optional[List[str]] = None,
         time_col: Optional[str] = None
     ):
         super().__init__()
         self.window_size = window_size
         self.use_timestamp = use_timestamp
+        self.use_log_return = use_log_return
+        self.log_return_features = log_return_features
+
+        # 1. Prepare Data
+        data = series.copy()
         
+        if self.use_log_return:
+            targets = log_return_features if log_return_features else ['Close']
+            for col in targets:
+                if col in data.columns:
+                    # คำนวณ Log Return: ln(Pt) - ln(Pt-1)
+                    data[col] = np.log(data[col]).diff()
+            
+            # *** สำคัญ: ใช้ fillna(0) แทน dropna() ***
+            # เพื่อให้จำนวนบรรทัดเท่าเดิม! Index ที่ PortfolioDataset ถืออยู่จะได้ไม่พัง
+            data = data.fillna(0)
+            
         """ 1. Care the target features! """
         if features is None:
             self.features = [c for c in series.columns if c != time_col]
         else:
             self.features = features
+            
         """ 1.1 filter only target features! """
-        self.raw_values = series[self.features].values.astype(np.float32)
+        self.raw_values = data[self.features].values.astype(np.float32)
       
-        values = series[self.features].values
+        values = data[self.features].values
 
+        """ 1.2 Keep date time """
+        if time_col and time_col in data.columns:
+            self.dates = data[time_col].values
+        else:
+            self.dates = np.arange(len(data))
+    
         """ 2. Scaler """
         self.scaler = scaler if scaler is not None else StandardScaler()
-        self.is_fitted = scaler is not None
+        if hasattr(self.scaler, 'mean_'):
+            self.is_fitted = True
+        else:
+            self.is_fitted = False        
+        
         if not self.is_fitted:
             self.scaled_values = self.scaler.fit_transform(self.raw_values)
             self.is_fitted = True
@@ -253,3 +349,11 @@ class TimeSeriesDataset(Dataset):
 
     def get_n_features(self):
         return len(self.features)
+
+    def plot_timeline(self, start_idx: int = 0, feature: str = "Close"):
+        """Plot all data begin at start_idx util the end"""
+        viz_single_timeline(self, start_idx, feature)
+
+    def plot_window(self, start_idx: int, feature: str = "Close"):
+        """Plot specific Window begin at start_idx"""
+        viz_single_window(self, start_idx, feature)

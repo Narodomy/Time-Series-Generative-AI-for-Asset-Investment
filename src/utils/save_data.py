@@ -6,7 +6,7 @@ import sys
 
 from tqdm import tqdm
 from datetime import datetime
-from .paths import ROOT, DATA_DIR, RAW_DIR, PROCESSED_DIR
+from .paths import ROOT, DATA_DIR, RAW_DIR, PROCESSED_DIR, PRICE_DIR
 
 ASSET_CLASS = "equity"
 INTERVAL = "1d"
@@ -40,7 +40,7 @@ def save_prices( tickers,
         # 3. Define Path for saving
         #    such as data/raw/equity/1d/AAPL.csv
         #    or data/raw/futures/1h/ES_F.csv
-        save_dir = RAW_DIR / asset_class / interval
+        save_dir = PRICE_DIR / asset_class / interval
         
         # If there has special character.
         safe_ticker_name = ticker.replace('=F', '_F').replace('=X', '_X')
