@@ -1,15 +1,10 @@
 __version__ = "0.1.0"
 
-from .entities import SingleAsset, AssetBasket
 from .strategies import AlignmentStrategy, StrictAlignment, FillAlignment
 from .features import FeatureEngineer
 from .datasets import MarketMaskedDataset
-
+from .data_module import MarketDataModule
 __all__ = [
-    # Entities
-    "SingleAsset",
-    "AssetBasket",
-    
     # Strategies
     "AlignmentStrategy",
     "StrictAlignment",
@@ -20,4 +15,6 @@ __all__ = [
     
     # Datasets
     "MarketMaskedDataset",
+
+    "MarketDataModule",
 ]
