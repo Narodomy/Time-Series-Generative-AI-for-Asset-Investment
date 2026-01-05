@@ -81,7 +81,7 @@ class AssetBasket:
             logger.error(f"Alignment strategy failed: {e}", exc_info=True)
             raise e
 
-    def get_stats_summary(self, column='Close_ret') -> pd.DataFrame:
+    def get_stats_summary(self, column='Close_Returns') -> pd.DataFrame:
         """
         Calculate descriptive statistics for all assets.
         Returns a DataFrame containing Mean, Std, Min, Max, Skew, Kurtosis, etc.
@@ -129,7 +129,7 @@ class AssetBasket:
             
         return df_stats
     
-    def plot_assets(self, column='Close_ret', title="Basket Composition"):
+    def plot_assets(self, column='Close_Returns', title="Basket Composition"):
         """
         Plot all assets in the basket on the same chart.
         """

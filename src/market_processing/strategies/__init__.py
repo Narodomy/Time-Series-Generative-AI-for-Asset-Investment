@@ -1,4 +1,4 @@
 from .base import AlignmentStrategy
-from .concrete import StrictAlignment, FillAlignment
+from .concrete import StrictAlignment, FillAlignment, MarketFeatureAlignment
 
-__all__ = ["AlignmentStrategy", "StrictAlignment", "FillAlignment"]
+__all__ = ["AlignmentStrategy", "StrictAlignment", "FillAlignment", "MarketFeatureAlignment"]

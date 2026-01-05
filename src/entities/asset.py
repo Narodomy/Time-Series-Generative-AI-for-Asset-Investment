@@ -33,10 +33,10 @@ class SingleAsset:
             if col in self.data.columns:
                 if log:
                     # Log Return: ln(Pt / Pt-1)
-                    self.data[f"{col}_ret"] = np.log(self.data[col]).diff()
+                    self.data[f"{col}_Returns"] = np.log(self.data[col]).diff()
                 else:
                     # Simple Return: (Pt - Pt-1) / Pt-1
-                    self.data[f"{col}_ret"] = self.data[col].pct_change()
+                    self.data[f"{col}_Returns"] = self.data[col].pct_change()
             else:
                 logger.warning(f'Feature ({col}) is not found!')
         self.data.dropna(inplace=True)
@@ -52,7 +52,7 @@ class SingleAsset:
     ==========================================
     """
     
-    def get_simple_vol(self, look_back=30, annualized=True, days_per_year=252):
+    def get_simple_vol(self, look_back=30, annualized=False, days_per_year=252):
         """Rolling Standard Deviation based on Close Price"""
         c = self.data['Close']
         # Log Return
@@ -63,7 +63,7 @@ class SingleAsset:
             vol = vol * np.sqrt(days_per_year) * 100
         return vol
 
-    def get_ewma_vol(self, lamb=0.94, annualized=True, days_per_year=252):
+    def get_ewma_vol(self, lamb=0.94, annualized=False, days_per_year=252):
         """Exponentially Weighted Moving Average Volatility"""
         c = self.data['Close']
         r = np.log(c.pct_change(1) + 1)
@@ -76,7 +76,7 @@ class SingleAsset:
             vol = vol * np.sqrt(days_per_year) * 100
         return vol
 
-    def get_parkinson_vol(self, look_back=30, annualized=True, days_per_year=252):
+    def get_parkinson_vol(self, look_back=30, annualized=False, days_per_year=252):
         """Parkinson Volatility (Uses High/Low) - Good for intraday range info"""
         if 'High' not in self.data.columns or 'Low' not in self.data.columns:
             print(f"Warning: {self.symbol} missing High/Low data for Parkinson Vol.")
@@ -94,7 +94,7 @@ class SingleAsset:
             vol = vol * np.sqrt(days_per_year) * 100
         return vol
 
-    def get_garman_klass_vol(self, look_back=30, annualized=True, days_per_year=252):
+    def get_garman_klass_vol(self, look_back=30, annualized=False, days_per_year=252):
         """Garman-Klass Volatility (Uses OHLC) - More efficient estimator"""
         required = ['Open', 'High', 'Low', 'Close']
         if not all(col in self.data.columns for col in required):
