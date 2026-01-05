@@ -30,3 +30,18 @@ conda activate tsgen
 
 ### 3. Extract the packages
 ```pip install -e .```
+
+## Data Structure
+### Design Class
+#### 1. SingleAsset (Atomic Unit):
+Manages individual asset data and handles its own technical indicators.
+#### 2. AssetBasket (Data Aggregator):
+Responsible for data loading, preprocessing, and aligning multiple assets to ensure consistency.
+#### 3. Portfolio (Execution & Evaluation):
+Portfolio shouldn't **inherit from** ```Dataset``` and ```AssetBasket``` classes, but it should be **Standalone class** to obtain the price data for calculation **NAV (Net Asset Value)**
+1. **Concept: Separation of Concerns**
+    * **AssetBasket (Data Layer):** Acts as a repository for historical price data (e.g., AAPL, GOOGL, TSLA over 10 years).
+    * **Portfolio (Logic Layer):** Defines the asset allocation (e.g., 50/50 split) and calculates the portfolio's performance based on provided price paths.
+2. **Code Structure (Pythonic Design)**
+To facilitate benchmarking, the Portfolio is designed to process both Historical Data (```AssetBasket```) and **Generated Path Data.** This decoupled approach allows for direct comparison between real-world performance and model-driven simulations.
+The final layer that manages investment strategies, performance calculation, and benchmarking.
