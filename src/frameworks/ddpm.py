@@ -151,3 +151,46 @@ class Diffusion:
         full_seq = x.cpu().numpy()[0]
         """ Return (history part, forecast part) """
         return full_seq[:n_req_hist], full_seq[n_req_hist:]
+
+    def sample_inpainting(self, model, x_real, mask):
+        """
+        RePaint: Inpainting using Denoising Diffusion Probabilistic Models 
+        
+        x_real: real data [B, L, C]
+        mask:   mask data [B, L, C]
+                0 = New Generate (Generate Field) (Unknown / Missing / Target) 
+                1 = Ground Truth Data (Known / Condition)
+                
+        Reference: https://arxiv.org/pdf/2201.09865
+        """
+        n, l, c = x_real.shape
+        logging.info(f"Starting In-painting/Forecasting for {n} samples...")
+        model.eval()
+        
+        with torch.no_grad():
+            x = torch.randn((n, l, c)).to(self.device) # Start with 100% noises
+            # Reverse Process
+            for i in tqdm(reversed(range(1, self.noise_steps)), desc="In-painting", total=self.noise_steps-1):
+                # t as tensor value means current time
+                t = (torch.ones(n) * i).long().to(self.device)
+                # Predict Noise at x_t
+                predicted_noise = model(x, t)
+                
+                # Calc x_{t-1} (Generate)
+                alpha = self.alpha[t][:, None, None]
+                alpha_hat = self.alpha_hat[t][:, None, None]
+                beta = self.beta[t][:, None, None]
+
+                if i > 1:
+                    noise = torch.randn_like(x)
+                else:
+                    noise = torch.zeros_like(x)
+
+                # Sampling DDPM
+                x_gen = (1 / torch.sqrt(alpha)) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
+
+                t_prev = (torch.ones(n) * (i - 1)).long().to(self.device)
+                x_real_noisy, _ = self.noise(x_real, t_prev)
+
+                x = mask * x_real_noisy + (1 - mask) * x_gen
+        return x
