@@ -24,8 +24,93 @@ class SlidingWindowDataset(Dataset):
         window_data = self.data[idx : idx + self.window_size]
         target_data = self.data[idx + 1 : idx + self.window_size + 1]
         return window_data, target_data
+        
+class DecoderModule:
+    def __init__(self, scaler, column_names, asset_names):
+        """
+        scaler:        Sklearn StandardScaler which be fitted must same 
+        column_names:  List of all columns
+        column_assets: List of all assets
+        """
+        self.scaler = scaler
+        self.column_names = np.array(column_names)
+        self.asset_names = asset_names
+        self.n_assets = len(asset_names)
+        
+        # Pre-calculate indices map to fast up
+        self._map_indices()
 
-# --- Main Class: The Manager ---
+    def _map_indices(self):
+        self.idx_map = {
+            "returns": [],
+            "vols": [],
+            "corrs": {} # Key: (AssetA, AssetB) -> Value: Index
+        }
+        
+        for i, col in enumerate(self.column_names):
+            # Returns (Example: 'AAPL_LogReturn' or just 'AAPL')
+            if "Return" in col: 
+                self.idx_map["returns"].append(i)
+            
+            # Volatility (Example: 'Vol_AAPL', 'GK_Vol_AAPL')
+            elif "Vol" in col or "GARCH" in col:
+                self.idx_map["vols"].append(i)
+                
+            # Correlation (Example: 'Corr_AAPL_TSLA')
+            elif "Corr" in col or "Rho" in col:
+                parts = col.split('_')
+                found = [p for p in parts if p in self.asset_names]
+                if len(found) >= 2:
+                    a1, a2 = found[0], found[1]
+                    self.idx_map["corrs"][(a1, a2)] = i
+                    self.idx_map["corrs"][(a2, a1)] = i
+
+    def decode(self, x_normalized):
+        """
+        Input:  Normalized Numpy Array [Batch, Time, Features]
+        Output: List of Dicts (Real Values)
+        """
+        batch, seq_len, feats = x_normalized.shape
+        
+        # 1. Inverse Scale
+        flat = x_normalized.reshape(-1, feats)
+        inv_flat = self.scaler.inverse_transform(flat)
+        x_real = inv_flat.reshape(batch, seq_len, feats)
+        
+        results = []
+        for b in range(batch):
+            sample_data = {
+                "returns": None,
+                "volatilities": None, 
+                "correlation_matrices": np.zeros((seq_len, self.n_assets, self.n_assets))
+            }
+            
+            # Returns
+            if self.idx_map["returns"]:
+                sample_data["returns"] = x_real[b, :, self.idx_map["returns"]]
+            
+            # Volatilities
+            if self.idx_map["vols"]:
+                sample_data["volatilities"] = x_real[b, :, self.idx_map["vols"]]
+                
+            # Correlation Matrices (Reconstruct N x N)
+            for t in range(seq_len):
+                mat = np.eye(self.n_assets) # Diag = 1
+                for i in range(self.n_assets):
+                    for j in range(i+1, self.n_assets):
+                        a1, a2 = self.asset_names[i], self.asset_names[j]
+                        if (a1, a2) in self.idx_map["corrs"]:
+                            idx = self.idx_map["corrs"][(a1, a2)]
+                            val = np.clip(x_real[b, t, idx], -1, 1) # Clip กันเหนียว
+                            mat[i, j] = val
+                            mat[j, i] = val
+                sample_data["correlation_matrices"][t] = mat
+            
+            results.append(sample_data)
+            
+        return results
+        
+# Main Class: The Manager
 class MarketDataModule:
     def __init__(
         self,

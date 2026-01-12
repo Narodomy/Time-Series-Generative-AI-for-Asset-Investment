@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import numpy as np
 import logging
 import matplotlib.pyplot as plt
 
@@ -132,7 +133,103 @@ class Engine:
                 # If it's not, just normal save
                 if (epoch + 1) % save_interval == 0:
                     self._save_checkpoint(epoch+1, avg_train_loss, f"ckpt_ep{epoch+1}.pt")
+
+    # def simulate(self, n_samples=64, steps_to_predict=1 ,test_dataloader=None):
+    #     # X real = Ground Truth, X Filled = In-painted
+    #     loader = test_dataloader if test_dataloader is not None else self.test_dataloader
+    #     if loader is None:
+    #         raise ValueError("Test Dataloader is not defined.")
+            
+    #     logger.info(f"Starting Simulate (Masking last {steps_to_predict} steps) on {n_samples} samples...")
+        
+    #     self.model.eval()
+        
+    #     results_true = []
+    #     results_pred = []
+    #     count = 0
+
+    #     # Pull Test set
+    #     with torch.no_grad():
+    #         for batch in loader:
+    #             if count >= n_samples:
+    #                 break
+
+    #             # Prepare Data
+    #             if isinstance(batch, (list, tuple)):
+    #                 x_real = batch[0]
+    #             else:
+    #                 x_real = batch
                     
+    #             current_batch_size = x_real.shape[0]
+    #             if count + current_batch_size > n_samples:
+    #                 needed = n_samples - count
+    #                 x_real = x_real[:needed]
+
+    #             x_real = x_real.to(self.device).float() # [Batch, Window_Size, Features]
+    #             batch_size, seq_len, features = x_real.shape
+                
+    #             # Create Mask
+    #             # Logic: 1 = Known (Context), 0 = Unknown (To Predict)
+    #             mask = torch.ones_like(x_real).to(self.device)
+
+    #             # For examples: seq_len=64, steps=1 -> Close at 63 (index -1)
+    #             #               seq_len=64, steps=5 -> Close at 59-63 (index -5 to last one)
+    #             mask[:, -steps_to_predict:, :] = 0
+
+    #             # In-painting
+    #             x_filled = self.diffusion.sample_inpainting(self.model, x_real, mask)
+        
+    #             # Ground Truth (Normalized)
+    #             if steps_to_predict > 0:
+    #                 x_filled[:, :-steps_to_predict, :] = x_real[:, :-steps_to_predict, :]
+    #             # Forcasted (Normalized)
+    #             results_true.append(x_real.cpu().numpy())
+    #             results_pred.append(x_filled.cpu().numpy())
+                
+    #             count += x_real.shape[0]
+
+    #     # Shape output: [n_samples, steps_to_predict, features]
+    #     final_true = np.concatenate(results_true, axis=0)
+    #     final_pred = np.concatenate(results_pred, axis=0)
+        
+    #     logger.info(f"Simulate finished. Shape: {final_pred.shape}")
+        
+    #     return final_true, final_pred
+
+    def simulate(self, x, steps_to_predict=1):
+        """
+        Pure Function: รับ Tensor เข้ามาทำ In-painting แล้วจบ
+        ไม่สนใจ Dataloader หรือ Loop ภายนอก
+        """
+        self.model.eval()
+        
+        # 1. จัดทรง (ใช้ Adapter ตัวเก่งของเรา)
+        if not torch.is_tensor(x):
+            x = torch.tensor(x)
+        x = x.to(self.device).float()
+        
+        # เรียก Adapter (สมมติว่าพี่มี Class TensorAdapter จากรอบที่แล้ว)
+        # ถ้ายังไม่มี ให้ใช้ x_std = x.reshape(...) ธรรมดาไปก่อน
+        x_std, meta = TensorAdapter.to_model_input(x)
+        
+        # 2. สร้าง Mask
+        mask = torch.ones_like(x_std).to(self.device)
+        if steps_to_predict > 0:
+            mask[:, -steps_to_predict:, :] = 0  # ปิดท้าย
+            
+        # 3. เข้าเตาอบ (Diffusion)
+        with torch.no_grad():
+            x_filled = self.diffusion.sample_inpainting(self.model, x_std, mask)
+            
+            # 4. Fix Context (เอาของจริงแปะทับส่วนที่ไม่โดนบัง)
+            if steps_to_predict > 0:
+                x_filled[:, :-steps_to_predict, :] = x_std[:, :-steps_to_predict, :]
+                
+        # 5. คืนร่างเดิม
+        x_out = TensorAdapter.restore_output(x_filled, meta)
+        
+        return x_out.cpu().numpy()
+    
     def _save_checkpoint(self, epoch, loss, filename):
         # Wrapper function for save_model
         try:
@@ -147,3 +244,73 @@ class Engine:
             )
         except:
             pass
+
+
+
+class TensorAdapter:
+    """
+    Adapter Pattern for Tensor Shapes.
+    Standardizes input dimensions to [Batch, Length, Channel] for model ingestion.
+    """
+    
+    @staticmethod
+    def to_model_input(x: torch.Tensor):
+        """
+        Adapts arbitrary input shapes to the standard [B, L, C] format.
+        
+        Args:
+            x (Tensor): Input tensor (2D, 3D, or 4D)
+            
+        Returns:
+            adapted_x (Tensor): Standardized [B, L, C] tensor.
+            metadata (dict): Info needed to restore the original shape.
+        """
+        original_shape = x.shape
+        ndim = len(original_shape)
+        
+        metadata = {'shape': original_shape, 'ndim': ndim}
+
+        if ndim == 2:
+            # [L, C] -> [1, L, C] (Single sample)
+            adapted_x = x.unsqueeze(0)
+            
+        elif ndim == 3:
+            # [B, L, C] -> Pass through (Standard)
+            adapted_x = x
+            
+        elif ndim == 4:
+            # [B, N, L, C] -> [B*N, L, C] (Flatten batch & assets)
+            b, n, l, c = original_shape
+            adapted_x = x.reshape(-1, l, c)
+            
+        else:
+            raise ValueError(f"TensorAdapter: Unsupported shape {original_shape}")
+            
+        return adapted_x, metadata
+
+    @staticmethod
+    def restore_output(x: torch.Tensor, metadata: dict):
+        """
+        Restores the tensor to its original logical shape.
+        """
+        original_shape = metadata['shape']
+        ndim = metadata['ndim']
+        
+        # Get current batch size (might be different if we sliced logic inside, but usually same)
+        curr_b = x.shape[0]
+
+        if ndim == 2:
+            # [1, L, C] -> [L, C]
+            return x.squeeze(0)
+            
+        elif ndim == 3:
+            return x
+            
+        elif ndim == 4:
+            # [B*N, L, C] -> [B, N, L, C]
+            # Recalculate B in case batch size changed (unlikely in forecast, but safe)
+            _, n, l, c = original_shape
+            new_b = curr_b // n
+            return x.reshape(new_b, n, l, c)
+            
+        return x
