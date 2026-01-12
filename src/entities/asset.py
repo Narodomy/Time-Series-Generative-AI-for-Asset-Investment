@@ -11,12 +11,13 @@ log_ret_key = "(Log_Returns)"
 simple_ret_key = "(Returns)"
 
 class Asset:
-    def __init__(self, symbol: str, data: pd.DataFrame):
+    def __init__(self, symbol: str, data: pd.DataFrame, device="cuda"):
         self.symbol = symbol
         self.data = data.copy() # OHLCV
         self.initial_prices: Dict[str, float] = {}
         self.return_type: Dict[str, str] = {}  # "log" | "simple"
-        
+
+        self._device = device
         logger.debug(f"Initialized Asset: {self.symbol} with {len(data)} rows.")
             
     @classmethod
@@ -37,7 +38,10 @@ class Asset:
     
     @property
     def device(self):
-        return self.data.device
+        if self._device == "cuda":
+            self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        logger.debug(f"Asset: {self.symbol} is using {self._device} device.")
+        return self._device
 
     def to(self, device: torch.device):
         """Moves the underlying tensor to the specified device."""
@@ -46,6 +50,10 @@ class Asset:
 
     def __len__(self):
         return self.n_observed
+        
+    def add_local_feature(self, func, **kwargs):
+        """Put specific indicator such as RSI, MA"""
+        self.data = func(self.data, **kwargs)
     
     def to_returns(self, log=True, columns=['Close'], keep=False):
         """ Convert Price to Returns. """
@@ -70,6 +78,8 @@ class Asset:
             
         self.data.dropna(inplace=True)
         logger.debug(f'{self.symbol} converted to Returns (log={log})')
+        
+        return self
 
     def inverse_returns(self, columns=None, keep=False, initialPrices: dict | None = None):
         """ Reconstruct price path from returns. """
@@ -108,21 +118,41 @@ class Asset:
         if not keep:
             self.data.drop(columns=columns, inplace=True)
             
+        logger.debug(f'{self.symbol} inversed Returns')
+
         return self
-    
-    def add_local_feature(self, func, **kwargs):
-        """Put specific indicator such as RSI, MA"""
-        self.data = func(self.data, **kwargs)
-    
-    def plot(self, column='Close'):
+
+    def to_tensor(self, features: list[str], device: torch.device = None) -> torch.Tensor:
+        """
+        Convert selected features to PyTorch Tensor.
+        Shape: [L, F] (Length, Features)
+        """
+        # Check if features exist
+        missing = [f for f in features if f not in self.data.columns]
+        if missing:
+            raise ValueError(f"Asset {self.symbol} missing features: {missing}")
+                
+        # Extract values (numpy)
+        values = self.data[features].values
+
+        # Convert to Tensor
+        tensor = torch.from_numpy(values).float()
+
+        # Move to device
+        device = device if device is not None else self.device
+        if device:
+            tensor = tensor.to(device)
+
+        return tensor # Shape: [L, F]
+        
+    def plot(self, column):
         """
         Simple plot for specific column (Price or Return)
         x: Time (Index)
         y: Value (Column)
         """
         if column not in self.data.columns:
-            print(f"Error: Column '{column}' not found in {self.symbol}")
-            return
+            raise ValueError(f"Error: Column '{column}' not found in {self.symbol}")
             
         plt.figure(figsize=(10, 5))
         
