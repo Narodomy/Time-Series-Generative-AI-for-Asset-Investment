@@ -1,19 +1,22 @@
 import logging
+import torch
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
 from typing import List, Dict, Optional
 from .asset import Asset
-from market_processing.strategies.base import AlignmentStrategy
+from strategies import AlignmentStrategy
 
 logger = logging.getLogger(__name__)
 
 class Basket:
-    def __init__(self, symbols: List[str]):
+    def __init__(self, symbols: List[str], device: torch.device= torch.device("cuda")):
         self.symbols = symbols
         self.assets: Dict[str, Asset] = {}
         self.stats = None
+
+        self._device = device
         # Load data logic here...
         logger.debug(f"Initialized Asset Basket: {self.symbols} with {len(self.assets)} assets which loaded.")
         
@@ -25,6 +28,16 @@ class Basket:
     def n_loaded(self) -> int:
         return len(self.assets)
 
+    @property
+    def shape(self):
+        return self.data.shape
+    
+    @property
+    def device(self):
+        # self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        logger.debug(f"Asset: {self.symbol} is using {self._device} device.")
+        return self._device
+    
     def __len__(self):
         return self.n_loaded
         
@@ -69,19 +82,41 @@ class Basket:
         
         logger.info(f"Batch load complete. Success: {success_count}/{self.n_planned}. Total assets in basket: {self.n_loaded}")
 
-    def get_joint_data(self, alignment_strategy: AlignmentStrategy) -> pd.DataFrame:
+    def align(self, strategy: AlignmentStrategy, inplace: bool = True) -> pd.DataFrame:
+        """
+        Aligns all assets based on the provided strategy.
+        
+        Args:
+            strategy: The logic to align dates (e.g., Inner Join, Outer Join).
+            inplace: If True, updates the internal .data of each Asset to match the aligned index.
+                     (Required True if you want to call .to_tensor() afterwards)
+        Returns:
+            pd.DataFrame: A single DataFrame containing aligned data (MultiIndex or wide format).
+        """
         if not self.assets:
             logger.warning("Basket is empty! Cannot perform alignment.")
             return pd.DataFrame()
 
+        # Gather raw data
         data_map = {t: a.data for t, a in self.assets.items()}
-        
+
         try:
-            aligned_df = alignment_strategy.align(data_map)
+            # Perform Alignment (Strategy Pattern)
+            aligned_df = strategy.align(data_map)
             logger.debug(f"Aligned data shape: {aligned_df.shape}")
+
+            # If inplace, update individual assets to match the aligned index
+            if inplace:
+                common_index = aligned_df.index
+                for symbol, asset in self.assets.items():
+                    asset.data = asset.data.loc[asset.data.index.intersection(common_index)]
+            
+                logger.info(f"Assets updated in-place to aligned index (Length: {len(common_index)})")
+            
             return aligned_df
+            
         except Exception as e:
-            logger.error(f"Alignment strategy failed: {e}", exc_info=True)
+            logger.error(f"Alignment failed: {e}", exc_info=True)
             raise e
 
     def get_stats_summary(self, column='Close_Returns') -> pd.DataFrame:
@@ -132,29 +167,27 @@ class Basket:
             
         return df_stats
 
-    def to_tensor(self, feature_columns: Optional[List[str]] = None) -> np.ndarray:
-        """ Shape: [L, N, F] + B (In batch case) """
-        
+    def to_tensor(self, features: list[str], device: torch.device = None) -> np.ndarray:
+        """
+        Stack tensors from all loaded assets.
+        Shape: [L, N, F] (Length, Num_Assets, Features)
+        """
         if not self.assets:
-            logger.debug(f"All of assets are in the basket {len(self.asset)}")
-            raise ValueError("Basket is empyty!")
+            raise ValueError("Basket is empty!")
 
-        if feature_columns is None:
-            sample_asset = next(iter(self.assets.values()))
-            numeric_cols = sample_asset.data.select_dtypes(include=[np.number]).columns.tolist()
-            feature_columns = numeric_cols
-            
-        df = self.get_joint_data(alignment_strategy)
-        
-        # Stack into [L, N, F]
-        tensor = []
+        # Collect tensors from each asset
+        tensor_list = []
         for symbol in self.symbols:
             if symbol in self.assets:
-                asset_df = df[self.assets[symbol].data.columns] if feature_columns else df
-                tensor.append(asset_df[feature_columns].values)
-
-        stacked = np.stack(tensor, axis=1) # [L, N, F]
-        return stacked
+                # Call Asset method
+                asset_tensor = self.assets[symbol].to_tensor(features, device)
+                tensor_list.append(asset_tensor)
+        
+        # Stack along dimension 1 (Dimension N)
+        # Asset: [L, F] -> Stack dim=1 -> [L, N, F]
+        basket_tensor = torch.stack(tensor_list, dim=1)
+        
+        return basket_tensor
     
     def plot_assets(self, column='Close_Returns', title="Basket Composition"):
         """

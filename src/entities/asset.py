@@ -11,7 +11,7 @@ log_ret_key = "(Log_Returns)"
 simple_ret_key = "(Returns)"
 
 class Asset:
-    def __init__(self, symbol: str, data: pd.DataFrame, device="cuda"):
+    def __init__(self, symbol: str, data: pd.DataFrame, device: torch.device= torch.device("cuda")):
         self.symbol = symbol
         self.data = data.copy() # OHLCV
         self.initial_prices: Dict[str, float] = {}
@@ -38,8 +38,7 @@ class Asset:
     
     @property
     def device(self):
-        if self._device == "cuda":
-            self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         logger.debug(f"Asset: {self.symbol} is using {self._device} device.")
         return self._device
 
