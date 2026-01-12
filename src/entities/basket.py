@@ -1,16 +1,19 @@
 import logging
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
+
 from typing import List, Dict, Optional
-from .asset import SingleAsset
+from .asset import Asset
 from market_processing.strategies.base import AlignmentStrategy
 
 logger = logging.getLogger(__name__)
 
-class AssetBasket:
+class Basket:
     def __init__(self, symbols: List[str]):
         self.symbols = symbols
-        self.assets: Dict[str, SingleAsset] = {}
+        self.assets: Dict[str, Asset] = {}
+        self.stats = None
         # Load data logic here...
         logger.debug(f"Initialized Asset Basket: {self.symbols} with {len(self.assets)} assets which loaded.")
         
@@ -30,7 +33,7 @@ class AssetBasket:
             self.symbols.append(symbol)
             logger.debug(f"Added symbol: {symbol}")
     
-    def add_asset(self, asset: SingleAsset):
+    def add_asset(self, asset: Asset):
         if asset.data is None or asset.data.empty:
             logger.warning(f"Attempted to add empty asset: {asset.symbol}. Skipping.")
             return
@@ -42,7 +45,7 @@ class AssetBasket:
     def load_asset(self, symbol: str, freq="1d") -> bool:
         try:
             logger.debug(f"Attempting to load {symbol}...")
-            asset = SingleAsset.from_symbol(symbol, freq=freq)
+            asset = Asset.from_symbol(symbol, freq=freq)
             self.assets[symbol] = asset
             logger.info(f"Successfully loaded {symbol} ({len(asset)} rows).")
             return True
@@ -115,7 +118,7 @@ class AssetBasket:
             
         df_stats = pd.DataFrame(stats_list)
         
-        if not df_stats.empty:
+        if not stats.empty:
             df_stats.set_index('symbol', inplace=True)
             
             # 1. Avg of All Stats (such as Avg Return, Avg Volatility of Basket)
@@ -128,6 +131,30 @@ class AssetBasket:
             df_stats.loc['TOTAL_AVG'] = total_row
             
         return df_stats
+
+    def to_tensor(self, feature_columns: Optional[List[str]] = None) -> np.ndarray:
+        """ Shape: [L, N, F] + B (In batch case) """
+        
+        if not self.assets:
+            logger.debug(f"All of assets are in the basket {len(self.asset)}")
+            raise ValueError("Basket is empyty!")
+
+        if feature_columns is None:
+            sample_asset = next(iter(self.assets.values()))
+            numeric_cols = sample_asset.data.select_dtypes(include=[np.number]).columns.tolist()
+            feature_columns = numeric_cols
+            
+        df = self.get_joint_data(alignment_strategy)
+        
+        # Stack into [L, N, F]
+        tensor = []
+        for symbol in self.symbols:
+            if symbol in self.assets:
+                asset_df = df[self.assets[symbol].data.columns] if feature_columns else df
+                tensor.append(asset_df[feature_columns].values)
+
+        stacked = np.stack(tensor, axis=1) # [L, N, F]
+        return stacked
     
     def plot_assets(self, column='Close_Returns', title="Basket Composition"):
         """
@@ -151,7 +178,7 @@ class AssetBasket:
             plt.title(f"{title} ({column})")
             plt.xlabel("Date")
             plt.ylabel(column)
-            plt.legend() # โชว์ชื่อหุ้นตรงมุม
+            plt.legend()
             plt.grid(True, alpha=0.3)
             plt.show()
         else:

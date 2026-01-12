@@ -134,69 +134,69 @@ class Engine:
                 if (epoch + 1) % save_interval == 0:
                     self._save_checkpoint(epoch+1, avg_train_loss, f"ckpt_ep{epoch+1}.pt")
 
-    def simulate(self, n_samples=64, steps_to_predict=1 ,test_dataloader=None):
-        # X real = Ground Truth, X Filled = In-painted
-        loader = test_dataloader if test_dataloader is not None else self.test_dataloader
-        if loader is None:
-            raise ValueError("Test Dataloader is not defined.")
+    # def simulate(self, n_samples=64, steps_to_predict=1 ,test_dataloader=None):
+    #     # X real = Ground Truth, X Filled = In-painted
+    #     loader = test_dataloader if test_dataloader is not None else self.test_dataloader
+    #     if loader is None:
+    #         raise ValueError("Test Dataloader is not defined.")
             
-        logger.info(f"Starting Simulate (Masking last {steps_to_predict} steps) on {n_samples} samples...")
+    #     logger.info(f"Starting Simulate (Masking last {steps_to_predict} steps) on {n_samples} samples...")
         
-        self.model.eval()
+    #     self.model.eval()
         
-        results_true = []
-        results_pred = []
-        count = 0
+    #     results_true = []
+    #     results_pred = []
+    #     count = 0
 
-        # Pull Test set
-        with torch.no_grad():
-            for batch in loader:
-                if count >= n_samples:
-                    break
+    #     # Pull Test set
+    #     with torch.no_grad():
+    #         for batch in loader:
+    #             if count >= n_samples:
+    #                 break
 
-                # Prepare Data
-                if isinstance(batch, (list, tuple)):
-                    x_real = batch[0]
-                else:
-                    x_real = batch
+    #             # Prepare Data
+    #             if isinstance(batch, (list, tuple)):
+    #                 x_real = batch[0]
+    #             else:
+    #                 x_real = batch
                     
-                current_batch_size = x_real.shape[0]
-                if count + current_batch_size > n_samples:
-                    needed = n_samples - count
-                    x_real = x_real[:needed]
+    #             current_batch_size = x_real.shape[0]
+    #             if count + current_batch_size > n_samples:
+    #                 needed = n_samples - count
+    #                 x_real = x_real[:needed]
 
-                x_real = x_real.to(self.device).float() # [Batch, Window_Size, Features]
-                batch_size, seq_len, features = x_real.shape
+    #             x_real = x_real.to(self.device).float() # [Batch, Window_Size, Features]
+    #             batch_size, seq_len, features = x_real.shape
                 
-                # Create Mask
-                # Logic: 1 = Known (Context), 0 = Unknown (To Predict)
-                mask = torch.ones_like(x_real).to(self.device)
+    #             # Create Mask
+    #             # Logic: 1 = Known (Context), 0 = Unknown (To Predict)
+    #             mask = torch.ones_like(x_real).to(self.device)
 
-                # For examples: seq_len=64, steps=1 -> Close at 63 (index -1)
-                #               seq_len=64, steps=5 -> Close at 59-63 (index -5 to last one)
-                mask[:, -steps_to_predict:, :] = 0
+    #             # For examples: seq_len=64, steps=1 -> Close at 63 (index -1)
+    #             #               seq_len=64, steps=5 -> Close at 59-63 (index -5 to last one)
+    #             mask[:, -steps_to_predict:, :] = 0
 
-                # In-painting
-                x_filled = self.diffusion.sample_inpainting(self.model, x_real, mask)
+    #             # In-painting
+    #             x_filled = self.diffusion.sample_inpainting(self.model, x_real, mask)
         
-                # Ground Truth (Normalized)
-                if steps_to_predict > 0:
-                    x_filled[:, :-steps_to_predict, :] = x_real[:, :-steps_to_predict, :]
-                # Forcasted (Normalized)
-                results_true.append(x_real.cpu().numpy())
-                results_pred.append(x_filled.cpu().numpy())
+    #             # Ground Truth (Normalized)
+    #             if steps_to_predict > 0:
+    #                 x_filled[:, :-steps_to_predict, :] = x_real[:, :-steps_to_predict, :]
+    #             # Forcasted (Normalized)
+    #             results_true.append(x_real.cpu().numpy())
+    #             results_pred.append(x_filled.cpu().numpy())
                 
-                count += x_real.shape[0]
+    #             count += x_real.shape[0]
 
-        # Shape output: [n_samples, steps_to_predict, features]
-        final_true = np.concatenate(results_true, axis=0)
-        final_pred = np.concatenate(results_pred, axis=0)
+    #     # Shape output: [n_samples, steps_to_predict, features]
+    #     final_true = np.concatenate(results_true, axis=0)
+    #     final_pred = np.concatenate(results_pred, axis=0)
         
-        logger.info(f"Simulate finished. Shape: {final_pred.shape}")
+    #     logger.info(f"Simulate finished. Shape: {final_pred.shape}")
         
-        return final_true, final_pred
+    #     return final_true, final_pred
 
-    def predict_step(self, x, steps_to_predict=1):
+    def simulate(self, x, steps_to_predict=1):
         """
         Pure Function: รับ Tensor เข้ามาทำ In-painting แล้วจบ
         ไม่สนใจ Dataloader หรือ Loop ภายนอก
@@ -244,6 +244,7 @@ class Engine:
             )
         except:
             pass
+
 
 
 class TensorAdapter:

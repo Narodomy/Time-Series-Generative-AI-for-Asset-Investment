@@ -1,11 +1,11 @@
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
-from .asset import SingleAsset
-from .basket import AssetBasket
+from .asset import Asset
+from .basket import Basket
 from .portfolio import Portfolio
 
 __all__ = [
-    "SingleAsset", 
-    "AssetBasket", 
+    "Asset", 
+    "Basket", 
     "Portfolio"
 ]
