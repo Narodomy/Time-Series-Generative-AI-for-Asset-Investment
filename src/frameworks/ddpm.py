@@ -1,5 +1,8 @@
 import torch
 import logging
+import math
+import torch.nn.functional as F
+
 from tqdm import tqdm
 
 """ 
@@ -9,188 +12,138 @@ from tqdm import tqdm
     L means Length (Window size)
     C means Channels (Features)
 """
+logger = logging.getLogger(__name__)
 
 class Diffusion:
     def __init__(
-        self, 
-        noise_steps=1000, 
-        beta_start=1e-4, 
-        beta_end=0.02, 
-        length=60, 
-        channels=2,
-        device="cuda"
+        self,
+        noise_steps=1000,
+        beta_start=1e-4,
+        beta_end=0.02,
+        schedule="cosine",
+        device=torch.device("cuda")
     ):
-        """ Variables Setup """
+        # Variable Setup
         self.noise_steps = noise_steps
         self.beta_start = beta_start
         self.beta_end = beta_end
-        self.length = length
-        self.channels = channels
         self.device = device
+
+        # Prepare Schedule
+        self.betas = self.prepare_noise_schedule(schedule).to(device)
         
-        """ Calculation """ 
-        self.beta = self.prepare_noise_schedule().to(device)
-        self.alpha = 1 - self.beta
-        self.alpha_hat = torch.cumprod(self.alpha, dim=0)
+        # alpha_t = 1 - beta_t
+        self.alphas = 1. - self.betas 
 
-    def prepare_noise_schedule(self):
-        return torch.linspace(self.beta_start, self.beta_end, self.noise_steps) 
+        # q(x_t | x_0) call that Cumulative Product
+        self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)
 
-    def noise(self, x, t):
-        """ shape(x) = [B, L, C]  """
-        sqrt_alpha_hat = torch.sqrt(self.alpha_hat[t])[:, None, None]
-        sqrt_one_minus_alpha_hat = torch.sqrt(1 - self.alpha_hat[t])[:, None, None]
-        E = torch.randn_like(x)
-        return (sqrt_alpha_hat * x) + (sqrt_one_minus_alpha_hat * E), E
-    
-    def sample_timesteps(self, n):
-        """ Generate noises from 1 to noise steps (if noise steps = 1000) at size = 5 
-            means new 5 values into array (from 1 to 1000) 
-            such as n = 5, [1,100,200, 500, 1000] """
-        return torch.randint(low=1, high=self.noise_steps, size=(n,))
-    
-    def denoise_step(self, x_t, t, predicted_noise, noise=None):
-        """ From Reverse Process step """
-        """ 1d shape is [:, None, None] """
-        alpha = self.alpha[t][:, None, None]
-        alpha_hat = self.alpha_hat[t][:, None, None]
-        beta = self.beta[t][:, None, None]
+        # alpha_bar_{t-1} to calc Posterior Variance
+        self.alphas_cumprod_prev = F.pad(self.alphas_cumprod[:-1], (1, 0), value=1.0)
 
-        """ Calc Mean """
-        noise_coeff = (1 - alpha) / torch.sqrt(1 - alpha_hat)
-        mean = (1 / torch.sqrt(alpha)) * (x_t - noise_coeff * predicted_noise)
+        # Pre-Calced Constants
+        # DDPM equation: q(x_t | x_0) = N(x_t; sqrt(alpha_bar)*x_0, (1-alpha_bar)I)
 
-        if noise is None:
-            return mean
+        # Coefficient forward x_0 (Mean part)
+        self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)
 
-        variance = torch.sqrt(beta) * noise
-        return mean + variance
-    
-    def create_inpainting_mask(self, batch_size, known_length):
-        """ Mask for inpainting (1 = known, 0 = forecast) """
-        mask = torch.zeros((batch_size, self.length, self.channels)).to(self.device)
-        mask[:, :known_length, :] = 1.0
-        return mask
+        # Coefficient forward epsilon/noise (Variance part)
+        self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1. - self.alphas_cumprod)
 
-    def sample(self, model, n):
-        logging.info(f"Sampling {n} new time series windows....")
-        model.eval()
-        with torch.no_grad():
-            """ Start random noises, shape(x) = [B, L, C] """
-            x = torch.randn((n, self.length, self.channels)).to(self.device)
+        # 1 / sqrt(alpha_t) -> mutiply x_{t-1} (Denoise step/sampling)
+        self.sqrt_recip_alphas = torch.sqrt(1.0 / self.alphas)
+
+        # Posterior q(x_{t-1} | x_t, x_0)
+        # beta_tilde_t = beta_t * (1 - alpha_bar_{t-1}) / (1 - alpha_bar_t)
+        self.posterior_variance = self.betas * (1. - self.alphas_cumprod_prev) / (1. - self.alphas_cumprod)
+
+    def prepare_noise_schedule(self, schedule):
+        logger.debug(f"Diffusion is using {schedule} schedule.")
+        
+        if schedule == "linear":
+            return torch.linspace(self.beta_start, self.beta_end, self.noise_steps)
+        elif schedule == "cosine":
+            return self.cosine_variance_schedule(self.noise_steps) # Improved DDPM (Better for low noise levels)
+        else:
+            raise ValueError(f"Unknown schedule: {schedule}")
             
-            for i in tqdm(reversed(range(1, self.noise_steps)), position=0):
-            # for i in reversed(range(1, self.noise_steps)):
-                t = (torch.ones(n) * i).long().to(self.device)
-                predicted_noise = model(x, t)
-                
-                if i > 1:
-                    noise = torch.randn_like(x)
-                else:
-                    noise = torch.zeros_like(x)
-                x = self.denoise_step(x_t=x, t=t, predicted_noise=predicted_noise, noise=noise)
-        
-        model.train()
-        """ output shape(x) = [B, L, C] """
-        return x 
-        
-    def sample_forecast(self, model, hist_series, horizon):
-        model.eval()
-        logging.info(f"🔮 Forecasting next {horizon} steps...")
+    def cosine_variance_schedule(self, timesteps, s=0.008):
+        """ Standard Cosine Schedule from OpenAI/Nichol paper """
+        steps = timesteps + 1
+        x = torch.linspace(0, timesteps, steps)
+        alphas_cumprod = torch.cos(((x / timesteps) + s) / (1 + s) * math.pi * 0.5) ** 2
+        alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
+        betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
+        return torch.clip(betas, 0, 0.999)
 
-        """ Check data size, obtained data + forecast = window_size """
-        n_req_hist = self.length - horizon
-        if len(hist_series) < n_req_hist:
-            raise ValueError(f"History data too short! Need {req_hist} steps.")
-        """ Get only necessary part of data """
-        hist_part = hist_series[-n_req_hist:]
+    def extract(self, a, t, x_shape):
         """ 
-            Convert them to tensor, Create new mask 
-            Shape [1, Hist, Channels]
+            Pull a at t (time step) and reshape it to compatible with x
+            Can use both [B, T, F] and [B, T, N, F]
+            Arg:
+                t = Noise Level
+                a = alpha
+            Output shape be like: [Batch num, 1, 1 ,1] or [Batch num, 1, 1]
         """
-        x_known = torch.tensor(hist_part, dtype=torch.float32).unsqueeze(0).to(self.device) 
-        mask = self.create_inpainting_mask(batch_size=1, known_length=len(hist_part))
+        batch_size = t.shape[0]
+        out = a.gather(-1, t)
+        return out.reshape(batch_size, *((1, ) * (len(x_shape) - 1)))
 
-        with torch.no_grad():
-            """ Start with Radom Noise on linear """
-            x = torch.randn((1, self.length, self.channels)).to(self.device)
-
-            for i in tqdm(reversed(range(0, self.noise_steps)), position=0):
-                t = (torch.ones(1) * i).long().to(self.device)
-
-                """ Denoise Step """
-                alpha = self.alpha[t][:, None, None]
-                alpha_hat = self.alpha_hat[t][:, None, None]
-                predicted_noise = model(x, t)
-                
-                if i > 1:
-                    noise = torch.randn_like(x)
-                else:
-                    noise = torch.zeros_like(x)
-                    
-                """ Same Fomular with a sample function """
-                x = self.denoise_step(x_t=x, t=t, predicted_noise=predicted_noise, noise=noise)
-
-                """ In-painting Logic """
-                if i > 1:
-                    full_known_frame = torch.zeros_like(x)
-                    full_known_frame[:, :n_req_hist, :] = x_known
-
-                    """ Random Noise """
-                    noise_known = torch.randn_like(full_known_frame)
-                    """ Follow Forward Process Step of Diffusion """
-                    known_noisy = torch.sqrt(alpha_hat) * full_known_frame + torch.sqrt(1 - alpha_hat) * noise_known
-                    """ 
-                        Reference: https://arxiv.org/pdf/2201.09865
-                        RePaint: Inpainting using Denoising Diffusion Probabilistic Models 
-                    """
-                    x = mask * known_noisy + (1 - mask) * x
-
-        model.train()
-
-        full_seq = x.cpu().numpy()[0]
-        """ Return (history part, forecast part) """
-        return full_seq[:n_req_hist], full_seq[n_req_hist:]
-
-    def sample_inpainting(self, model, x_real, mask):
+    # Forward Process
+    def noise(self, x, t):
         """
-        RePaint: Inpainting using Denoising Diffusion Probabilistic Models 
+            Forward Diffusion Process
+            Reference: DDPM Eq. 4
+            x_t = sqrt(alpha_bar_t) * x_0 + sqrt(1 - alpha_bar_t) * epsilon
+        """
+        noise = torch.randn_like(x)
         
-        x_real: real data [B, L, C]
-        mask:   mask data [B, L, C]
-                0 = New Generate (Generate Field) (Unknown / Missing / Target) 
-                1 = Ground Truth Data (Known / Condition)
-                
-        Reference: https://arxiv.org/pdf/2201.09865
+        sqrt_alpha_bar = self.extract(self.sqrt_alphas_cumprod, t, x.shape)
+        sqrt_one_minus_alpha_bar = self.extract(self.sqrt_one_minus_alphas_cumprod, t, x.shape)
+        
+        x_noisy = sqrt_alpha_bar * x + sqrt_one_minus_alpha_bar * noise
+        return x_noisy, noise
+
+    # Reverse Process
+    def denoise_step(self, model, x, t, t_index):
         """
-        n, l, c = x_real.shape
-        logging.info(f"Starting In-painting/Forecasting for {n} samples...")
+            Reverse Diffusion Process (Sampling)
+            Reference: DDPM Eq. 11 (Algorithm 2)
+            mu_theta(x_t, t) = 1/sqrt(alpha_t) * (x_t - beta_t/sqrt(1-alpha_bar_t) * epsilon_theta)
+        """
+        # Coefficients
+        betas_t = self.extract(self.betas, t, x.shape)
+        sqrt_one_minus_alpha_bar_t = self.extract(self.sqrt_one_minus_alphas_cumprod, t, x.shape)
+        sqrt_recip_alpha_t = self.extract(self.sqrt_recip_alphas, t, x.shape)
+
+
+        # Predict Noise (epsilon_theta)
+        predicted_noise = model(x, t)
+
+        # Calculate Mean (mu_theta) from Eq. 11
+        model_mean = sqrt_recip_alpha_t * (
+            x - (betas_t * predicted_noise) / sqrt_one_minus_alpha_bar_t
+        )
+
+        # Add Variance (sigma_t * z) if t > 0
+        if t_index == 0:
+            return model_mean
+        else:
+            posterior_variance_t = self.extract(self.posterior_variance, t, x.shape)
+            noise = torch.randn_like(x)
+            
+            # Using posterior_variance (beta_tilde) instead the beta that follows Improved DDPM
+            return model_mean + torch.sqrt(posterior_variance_t) * noise
+
+    def sample(self, model, shape):
+        logger.info(f"Sampling shape {shape}...")
         model.eval()
-        
         with torch.no_grad():
-            x = torch.randn((n, l, c)).to(self.device) # Start with 100% noises
-            # Reverse Process
-            for i in tqdm(reversed(range(1, self.noise_steps)), desc="In-painting", total=self.noise_steps-1):
-                # t as tensor value means current time
-                t = (torch.ones(n) * i).long().to(self.device)
-                # Predict Noise at x_t
-                predicted_noise = model(x, t)
+            x = torch.randn(shape).to(self.device)
+            
+            for i in tqdm(reversed(range(0, self.noise_steps)), desc="Sampling", total=self.noise_steps):
+                t = (torch.ones(shape[0]) * i).long().to(self.device)
+                x = self.denoise_step(model, x, t, i)
                 
-                # Calc x_{t-1} (Generate)
-                alpha = self.alpha[t][:, None, None]
-                alpha_hat = self.alpha_hat[t][:, None, None]
-                beta = self.beta[t][:, None, None]
-
-                if i > 1:
-                    noise = torch.randn_like(x)
-                else:
-                    noise = torch.zeros_like(x)
-
-                # Sampling DDPM
-                x_gen = (1 / torch.sqrt(alpha)) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
-
-                t_prev = (torch.ones(n) * (i - 1)).long().to(self.device)
-                x_real_noisy, _ = self.noise(x_real, t_prev)
-
-                x = mask * x_real_noisy + (1 - mask) * x_gen
+        model.train()
         return x
