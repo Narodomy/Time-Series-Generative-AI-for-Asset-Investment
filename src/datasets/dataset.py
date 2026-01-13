@@ -52,50 +52,66 @@ class MarketDataset(Dataset):
             "window_idx": torch.tensor(window_idx)
         }
 
+
+class JointMarketDataset(Dataset):
+    def __init__(self, data_tensor):
+        """
+        data_tensor: [Batch (All Time), N, F], [All Time, N, F]
+        """
+        self.data = data_tensor
+        self.n_windows = self.data.shape[0]
+    
+    def __len__(self):
+        return self.n_windows
+
+    def __getitem__(self, idx):
+        return self.data[idx]
+
 def create_randomize_datasets(
-    dataset: MarketDataset, 
+    dataset: Dataset, 
     split_ratios: List[float] = [0.8, 0.1, 0.1],
     seed: int = 42
 ) -> Tuple[Subset, Subset, Subset]:
-    """
-    Creates randomized datasets using 'Hole Punching' strategy.
-    """
+    
     assert sum(split_ratios) == 1.0
     
-    total_windows = dataset.n_windows
+    # Check dataset type to determine total windows
+    if hasattr(dataset, 'n_windows'):
+        total_windows = dataset.n_windows
+    else:
+        # Fallback if manual dataset
+        total_windows = len(dataset) 
+        
     all_window_indices = np.arange(total_windows)
     
-    # Shuffle Random (Val/Test)
+    # Shuffle Time Windows (Not samples)
     np.random.seed(seed)
     np.random.shuffle(all_window_indices)
     
-    # Calc Window size
     val_size = int(total_windows * split_ratios[1])
     test_size = int(total_windows * split_ratios[2])
     
-    # Val/Test select first
     val_window_indices = all_window_indices[:val_size]
     test_window_indices = all_window_indices[val_size : val_size + test_size]
     
-    # Train takes remaining and sort them
+    # Train takes the rest and sorts them (Time integrity within train set)
     train_window_indices = all_window_indices[val_size + test_size:]
-    train_window_indices = np.sort(train_window_indices) # <-- sort times
+    train_window_indices = np.sort(train_window_indices)
     
-    # (Optional) Sort Val/Test
-    val_window_indices = np.sort(val_window_indices)
-    test_window_indices = np.sort(test_window_indices)
-
-    # Helper Concert Window Index to Dataset Index (Exhaustive Case)
+    # Helper: Expand indices for Exhaustive Mode
     def expand_indices(window_indices):
-        if dataset.mode == 'random':
-            return window_indices.tolist()
-        else: # exhaustive: 1 window to N assets
+        # Case 1: MarketDataset with 'exhaustive' mode
+        if hasattr(dataset, 'mode') and dataset.mode == 'exhaustive':
             final_indices = []
             for w in window_indices:
                 start = w * dataset.n_assets
                 end = start + dataset.n_assets
                 final_indices.extend(range(start, end))
             return final_indices
+            
+        # Case 2: MarketDataset(random) OR JointMarketDataset
+        else:
+            return window_indices.tolist()
 
     return (
         Subset(dataset, expand_indices(train_window_indices)),

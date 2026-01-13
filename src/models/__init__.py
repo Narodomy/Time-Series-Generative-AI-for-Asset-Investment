@@ -1,26 +1,20 @@
-__version__ = "0.1.0"
-
 from .modules import SinusoidalPositionEmbeddings
-# All models
+# NN Models
 from .unet import UNet, Up, Down, DoubleConv, SelfAttention
 from .lstm import DiffusionLSTM
-from .transformer import DiffusionTransformer
+from .ddpm_transformer import DiffusionTransformer
 
+__version__ = "0.1.1"
 __all__ = [
     # Method
     "SinusoidalPositionEmbeddings",
     
-    # Diffusion
-    # UNet
     "UNet",
     "Up",
     "Down",
     "DoubleConv",
     "SelfAttention",
 
-    # LSTM
     "DiffusionLSTM",
-
-    # Transformer
     "DiffusionTransformer",
 ]

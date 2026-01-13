@@ -1,8 +1,9 @@
-from .dataset import MarketDataset, create_randomize_datasets
+from .dataset import MarketDataset, JointMarketDataset, create_randomize_datasets
 
 __version__ = "0.1.3"
 
 __all__ = [
-    "MarketDataset", 
+    "MarketDataset",
+    "JointMarketDataset",
     "create_randomize_datasets",
 ]

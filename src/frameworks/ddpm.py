@@ -134,7 +134,7 @@ class Diffusion:
             
             # Using posterior_variance (beta_tilde) instead the beta that follows Improved DDPM
             return model_mean + torch.sqrt(posterior_variance_t) * noise
-
+    
     def sample(self, model, shape):
         logger.info(f"Sampling shape {shape}...")
         model.eval()
@@ -144,6 +144,41 @@ class Diffusion:
             for i in tqdm(reversed(range(0, self.noise_steps)), desc="Sampling", total=self.noise_steps):
                 t = (torch.ones(shape[0]) * i).long().to(self.device)
                 x = self.denoise_step(model, x, t, i)
+                
+        model.train()
+        return x
+
+    def sample_inpainting(self, model, x_real, mask):
+        """
+        RePaint Logic for Forecasting / Imputation
+        mask: 1 = Known (Condition), 0 = Unknown (Generate)
+        """
+        b = x_real.shape[0]
+        model.eval()
+        with torch.no_grad():
+            x = torch.randn_like(x_real).to(self.device)
+            
+            for i in tqdm(reversed(range(0, self.noise_steps)), desc="In-painting"):
+                t = (torch.ones(b) * i).long().to(self.device)
+                
+                # 1. Reverse (Predict x_{t-1})
+                x_pred = self.denoise_step(model, x, t, i)
+                
+                # 2. Forward (Add noise to Known Data at t-1)
+                if i > 0:
+                    t_prev = (torch.ones(b) * (i - 1)).long().to(self.device)
+                    # Note: We need noise at step t-1, so we call noise() manually
+                    # But simpler approach: just add noise to x_real at level i-1
+                    noise_new = torch.randn_like(x_real)
+                    # Calc alpha_bar at t-1
+                    sqrt_alpha_bar = self.extract(self.sqrt_alphas_cumprod, t_prev, x_real.shape)
+                    sqrt_one_minus_alpha_bar = self.extract(self.sqrt_one_minus_alphas_cumprod, t_prev, x_real.shape)
+                    x_known_noisy = sqrt_alpha_bar * x_real + sqrt_one_minus_alpha_bar * noise_new
+                else:
+                    x_known_noisy = x_real
+
+                # 3. Combine
+                x = mask * x_known_noisy + (1 - mask) * x_pred
                 
         model.train()
         return x
