@@ -11,7 +11,7 @@ class DiffusionTransformer(nn.Module):
         nhead=4, 
         num_layers=4, 
         dropout=0.1, 
-        max_len=500     # Window Size (Max L)
+        max_len=64     # Window Size (Max L)
     ):
         super().__init__()
         self.name = "DiffusionTransformer"
