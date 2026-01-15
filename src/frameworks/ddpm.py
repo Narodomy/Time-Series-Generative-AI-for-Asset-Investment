@@ -47,6 +47,11 @@ class Diffusion:
         # Coefficient forward x_0 (Mean part)
         self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)
 
+        """Hardcode fixed"""
+        self.sqrt_recip_alphas_cumprod = torch.sqrt(1. / self.alphas_cumprod)
+        self.sqrt_recipm1_alphas_cumprod = torch.sqrt(1. / self.alphas_cumprod - 1)
+        """--------------"""
+        
         # Coefficient forward epsilon/noise (Variance part)
         self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1. - self.alphas_cumprod)
 
@@ -120,10 +125,26 @@ class Diffusion:
         # Predict Noise (epsilon_theta)
         predicted_noise = model(x, t)
 
-        # Calculate Mean (mu_theta) from Eq. 11
-        model_mean = sqrt_recip_alpha_t * (
-            x - (betas_t * predicted_noise) / sqrt_one_minus_alpha_bar_t
+        """ Note Add to Hard code fixed """
+        sqrt_recip_alphas_cumprod_t = self.extract(torch.sqrt(1.0 / self.alphas_cumprod), t, x.shape)
+        sqrt_recipm1_alphas_cumprod_t = self.extract(torch.sqrt(1.0 / self.alphas_cumprod - 1), t, x.shape)
+
+        pred_x0 = sqrt_recip_alphas_cumprod_t * x - sqrt_recipm1_alphas_cumprod_t * predicted_noise
+        pred_x0 = torch.clamp(pred_x0, -1., 1.)
+
+        posterior_mean_coef1 = self.extract(
+            self.betas * torch.sqrt(self.alphas_cumprod_prev) / (1. - self.alphas_cumprod), t, x.shape
         )
+        posterior_mean_coef2 = self.extract(
+            (1. - self.alphas_cumprod_prev) * torch.sqrt(self.alphas) / (1. - self.alphas_cumprod), t, x.shape
+        )
+        model_mean = posterior_mean_coef1 * pred_x0 + posterior_mean_coef2 * x
+        """-------------------------------"""
+        
+        # Calculate Mean (mu_theta) from Eq. 11
+        # model_mean = sqrt_recip_alpha_t * (
+        #     x - (betas_t * predicted_noise) / sqrt_one_minus_alpha_bar_t
+        # )
 
         # Add Variance (sigma_t * z) if t > 0
         if t_index == 0:

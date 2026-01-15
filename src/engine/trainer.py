@@ -54,7 +54,7 @@ class Engine:
             b, l, n, f = x.shape
             x = x.reshape(b, l, n*f)
             
-        logger.debug(f"X Shape: {x.shape}")
+        # logger.debug(f"X Shape: {x.shape}")
         return x
 
     def _create_mask(self, x, steps_to_predict):
