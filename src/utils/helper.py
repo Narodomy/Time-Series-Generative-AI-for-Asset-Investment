@@ -13,6 +13,27 @@ from sklearn.decomposition import PCA
 from statsmodels.tsa.stattools import acf
 
 
+def verify_scaling(t: torch.Tensor, dim: int= None):
+    if dim is None:
+        print(f"--- Global Stats ---")
+        print(f"Max: {t.max().item():.4f}")
+        print(f"Min: {t.min().item():.4f}")
+        print(f"Mean: {t.mean().item():.4f}")
+        print(f"Std: {t.std().item():.4f}")
+
+    else:
+        print(f"--- Stats along dim {dim} ---")
+        max_val = t.max(dim=dim).values
+        min_val = t.min(dim=dim).values
+        mean_val = t.mean(dim=dim)
+        std_val = t.std(dim=dim)
+
+        print(f"Max: {max_val}") 
+        print(f"Min: {min_val}")
+        print(f"Mean: {mean_val}")
+        print(f"Std: {std_val}")
+
+
 def save_model(
     model: torch.nn.Module, 
     optimizer: torch.optim.Optimizer,

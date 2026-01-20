@@ -14,33 +14,44 @@ class Basket:
     def __init__(self, symbols: List[str], device: torch.device= torch.device("cuda")):
         self.symbols = symbols
         self.assets: Dict[str, Asset] = {}
-        self.stats = None
-
+        
+        self._data: Optinal[pd.DataFrame] = None
         self._device = device
         # Load data logic here...
         logger.debug(f"Initialized Asset Basket: {self.symbols} with {len(self.assets)} assets which loaded.")
+
+
+    @property 
+    def data(self) -> pd.DataFrame:
+        if self._data is not None:
+            return self._data
+            
+        if self.assets:
+            return pd.concat(
+                {s: a.data for s, a in self.assets.items()}, 
+                axis=1, 
+                keys=self.assets.keys() # MultiIndex (Symbol, Feature)
+            )
+
+        return pd.DataFrame()
         
-    @property
-    def n_planned(self) -> int:
-        return len(self.symbols)
-
-    @property
-    def n_loaded(self) -> int:
-        return len(self.assets)
-
-    @property
-    def shape(self):
-        return self.data.shape
-    
     @property
     def device(self):
         # self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         logger.debug(f"Asset: {self.symbol} is using {self._device} device.")
         return self._device
+
+    def get_unique_features(self) -> List[str]:
+        if not self.assets:
+            return []
+            
+        unique_cols = {col for asset in self.assets.values() for col in asset.data.columns}        
+        return sorted(list(unique_cols))
+
+    def to_returns(self, features: list, log: bool, keep: bool=False):
+        for symbol, asset in self.assets.items():
+            asset.to_returns(log=log, columns=features, keep=keep)
     
-    def __len__(self):
-        return self.n_loaded
-        
     def add_symbol(self, symbol: str):
         if symbol not in self.symbols:
             self.symbols.append(symbol)
@@ -80,19 +91,9 @@ class Basket:
             if self.load_asset(symbol, freq):
                 success_count += 1
         
-        logger.info(f"Batch load complete. Success: {success_count}/{self.n_planned}. Total assets in basket: {self.n_loaded}")
+        logger.info(f"Batch load complete. Success: {success_count}/{len(self.symbols)}. Total assets in basket: {len(self.assets)}")
 
     def align(self, strategy: AlignmentStrategy, inplace: bool = True) -> pd.DataFrame:
-        """
-        Aligns all assets based on the provided strategy.
-        
-        Args:
-            strategy: The logic to align dates (e.g., Inner Join, Outer Join).
-            inplace: If True, updates the internal .data of each Asset to match the aligned index.
-                     (Required True if you want to call .to_tensor() afterwards)
-        Returns:
-            pd.DataFrame: A single DataFrame containing aligned data (MultiIndex or wide format).
-        """
         if not self.assets:
             logger.warning("Basket is empty! Cannot perform alignment.")
             return pd.DataFrame()
@@ -103,8 +104,10 @@ class Basket:
         try:
             # Perform Alignment (Strategy Pattern)
             aligned_df = strategy.align(data_map)
+            self._data = aligned_df
+            
             logger.debug(f"Aligned data shape: {aligned_df.shape}")
-
+            
             # If inplace, update individual assets to match the aligned index
             if inplace:
                 common_index = aligned_df.index
@@ -170,7 +173,7 @@ class Basket:
     def to_tensor(self, features: list[str], device: torch.device = None) -> np.ndarray:
         """
         Stack tensors from all loaded assets.
-        Shape: [L, N, F] (Length, Num_Assets, Features)
+        Shape: [T, A, F] (Time, Assets, Features)
         """
         if not self.assets:
             raise ValueError("Basket is empty!")
@@ -184,12 +187,12 @@ class Basket:
                 tensor_list.append(asset_tensor)
         
         # Stack along dimension 1 (Dimension N)
-        # Asset: [L, F] -> Stack dim=1 -> [L, N, F]
+        # Asset: [T, F] -> Stack dim=1 -> [T, A, F]
         basket_tensor = torch.stack(tensor_list, dim=1)
         
         return basket_tensor
     
-    def plot_assets(self, column='Close_Returns', title="Basket Composition"):
+    def plot_assets(self, column, title="Basket Composition"):
         """
         Plot all assets in the basket on the same chart.
         """

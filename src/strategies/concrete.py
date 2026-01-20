@@ -6,28 +6,32 @@ from .base import AlignmentStrategy
 logger = logging.getLogger(__name__)
 
 class IntersectionStrategy(AlignmentStrategy):
-    """
-    [Strict Mode] Inner Join Logic.
-    Keeps only the timestamps that exist in ALL assets.
-    
-    Use Case: 
-    - Training Deep Learning models where NaN is not allowed.
-    - Result: Clean data, but length is limited by the asset with the shortest history.
-    """
     def align(self, data_map: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         if not data_map:
             return pd.DataFrame()
 
-        # keys=data_map.keys() creates a MultiIndex column structure (Symbol, Feature)
-        # join='inner' performs the intersection on the Index (Date)
-        aligned_df = pd.concat(
-            data_map.values(), 
-            axis=1, 
-            keys=data_map.keys(), 
-            join='inner'
-        )
+        clean_map = self.clean(data_map)
         
-        logger.debug(f"Intersection Strategy: Aligned {len(data_map)} assets. Common rows: {len(aligned_df)}")
+        if not clean_map:
+            logger.warning("All assets were empty after cleaning. Returning empty DataFrame.")
+            return pd.DataFrame()
+        try:
+            # keys=data_map.keys() creates a MultiIndex column structure (Symbol, Feature)
+            # join='inner' performs the intersection on the Index (Date)
+            aligned_df = pd.concat(
+                clean_map.values(), 
+                axis=1, 
+                keys=clean_map.keys(), 
+                join='inner'
+            )
+            
+            logger.info(f"Aligned: {len(data_map)} orig -> {len(clean_map)} clean assets -> {len(aligned_df)} rows")
+            return aligned_df
+            
+        except Exception as e:
+            logger.error(f"Alignment Error: {e}")
+            return pd.DataFrame()
+
         return aligned_df
 
 class UnionStrategy(AlignmentStrategy):

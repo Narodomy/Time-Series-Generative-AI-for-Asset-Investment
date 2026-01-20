@@ -3,11 +3,18 @@ import pandas as pd
 from typing import Dict
 
 class AlignmentStrategy(ABC):
-    """Abstract Base Class for define Assets collecting"""
+    def clean(self, data_map: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        cleaned_map = {}
+        for symbol, df in data_map.items():
+            df_cleaned = df.dropna(how='any')
+            
+            if not df_cleaned.empty:
+                cleaned_map[symbol] = df_cleaned
+            else:
+                logger.warning(f"Asset '{symbol}' removed: became empty after dropping NaNs.")
+    
+        return cleaned_map
+    
     @abstractmethod
     def align(self, data_map: Dict[str, pd.DataFrame]) -> pd.DataFrame:
-        """
-        Takes a dictionary of {symbol: dataframe} and returns a single DataFrame
-        that defines the 'aligned' index structure.
-        """
-        pass
+        raise NotImplementedError("Subclasses must implement .align()")

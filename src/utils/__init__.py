@@ -5,12 +5,16 @@ from .save_data import save_prices, save_prices_grouped, save_eq_fundamental, sa
 
 from .data_loader import read_equity
 from .scaler import SklearnWrapper
+from .helper import verify_scaling
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 __all__ = [
-    # data loader
+    # Data loader
     "read_equity",
 
     # Scaler
     "SklearnWrapper",
+
+    # Helper
+    "verify_scaling",
 ]
