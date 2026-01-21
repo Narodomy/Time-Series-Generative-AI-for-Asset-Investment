@@ -2,7 +2,6 @@ import torch
 import logging
 from typing import Optional, List
 from . import Basket
-from components import Window
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +11,7 @@ class Market:
     Manages the Assets (Basket) and Time Structure (Window).
     and produces the final [B, L, N, F] tensor.
     """
-    def __init__(self, basket: Basket, window: Window):
+    def __init__(self, basket: Basket, window):
         self.basket = basket
         self.window = window
         self._batch_tensor: Optional[torch.Tensor] = None # Cache

@@ -2,7 +2,9 @@ import logging
 import torch
 import pandas as pd
 import numpy as np
+import seaborn as sns
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mtick
 
 from typing import List, Dict, Optional
 from .asset import Asset
@@ -23,8 +25,8 @@ class Basket:
 
     @property 
     def data(self) -> pd.DataFrame:
-        if self._data is not None:
-            return self._data
+        # if self._data is not None:
+        #     return self._data
             
         if self.assets:
             return pd.concat(
@@ -122,6 +124,8 @@ class Basket:
             logger.error(f"Alignment failed: {e}", exc_info=True)
             raise e
 
+            
+    
     def get_stats_summary(self, column='Close_Returns') -> pd.DataFrame:
         """
         Calculate descriptive statistics for all assets.
@@ -191,11 +195,26 @@ class Basket:
         basket_tensor = torch.stack(tensor_list, dim=1)
         
         return basket_tensor
-    
+
+    def get_feature(self, feature: str, drop_empty: bool = True) -> pd.DataFrame:
+        if self.data.empty:
+            logger.warning("Basket data is empty.")
+            return pd.DataFrame()
+        try:
+            # Slice specific feature from MultiIndex columns
+            df_slice = self.data.xs(key=feature, level=1, axis=1)
+            
+            if drop_empty:
+                # Drop columns (assets) that are entirely NaN
+                df_slice = df_slice.dropna(axis=1, how='all')
+
+            return df_slice
+        except KeyError:
+            logger.warning(f"Feature '{feature}' not found in any asset.")
+            return pd.DataFrame()
+
+            
     def plot_assets(self, column, title="Basket Composition"):
-        """
-        Plot all assets in the basket on the same chart.
-        """
         if not self.assets:
             logger.warning("Basket is empty. Nothing to plot.")
             return
@@ -219,3 +238,64 @@ class Basket:
             plt.show()
         else:
             logger.warning(f"No assets found with column '{column}'. Did you calculate returns?")
+
+    def plot_cumulative_returns(self, return_col, title="Cumulative Performance"):
+        if self.data.empty: return
+
+        try:
+            df_returns = self.get_feature(return_col, drop_empty=True)
+            if df_returns.empty: return
+
+            # Calculate Cumulative Return: (1+r).cumprod() - 1
+            df_cum = (1 + df_returns.fillna(0)).cumprod() - 1
+
+            plt.figure(figsize=(12, 6))
+            for symbol in df_cum.columns:
+                plt.plot(df_cum.index, df_cum[symbol], label=symbol, linewidth=1.5)
+
+            plt.axhline(0, color='black', linestyle='--', alpha=0.5)
+            plt.title(f"{title} (based on {return_col})")
+            plt.xlabel("Date")
+            plt.ylabel("Cumulative Return")
+            plt.legend(loc='upper left')
+            plt.grid(True, alpha=0.3)
+            
+            # Format Y-axis as percentage
+            plt.gca().yaxis.set_major_formatter(mtick.PercentFormatter(xmax=1.0))
+            plt.show()
+
+        except Exception as e:
+            logger.error(f"Plotting cumulative returns failed: {e}")
+
+    def plot_distribution(self, column: str= "Close", kde: bool= True):
+        if self.data.empty:
+            logger.warning("Basket is empty.")
+            return
+
+        try:
+            df_slice = self.get_feature(column, drop_empty=True)
+            if df_slice.empty: 
+                logger.warning(f"No data found for feature '{column}'")
+                return
+
+            plt.figure(figsize=(12, 6))
+            for symbol in df_slice.columns:
+                sns.histplot(
+                    df_slice[symbol], 
+                    kde=kde, 
+                    label=symbol, 
+                    element="step", 
+                    stat="density", 
+                    alpha=0.3
+                )
+            
+            plt.title(f"Return Distribution ({column})")
+            plt.xlabel("Return")
+            plt.ylabel("Density")
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            plt.show()
+
+            
+        except Exception as e:
+            logger.error(f"Plotting distribution failed: {e}")

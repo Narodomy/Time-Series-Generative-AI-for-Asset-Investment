@@ -158,44 +158,80 @@ class Engine:
             best_val_loss = avg_val_loss
 
 
-    def simulate(self, x_input, steps_to_predict=1):
+    def simulate(self, x_input: torch.Tensor, steps: int= 1, extend=True):
         """
             In-painting Simulation (Forecast)
             x_input: [Length, Channels] (Single sample) or [Batch, Length, Channels]
         """
         self.model.eval()
         x = torch.tensor(x_input) if not torch.is_tensor(x_input) else x_input.clone()
-
-        # if batch is missing
-        if x.ndim == 2:
-            x = x.unsqueeze(0) # [1, L, C]
-
         x = x.to(self.device).float()
-
-        # Flatten if 4D
-        original_shape = None
+        
         if x.ndim == 4:
-            b, l, n, f = x.shape
-            original_shape = (b, l, n, f)
-            x = x.reshape(b, l, n*f)
+            raise ValueError(
+                f"Batch dimension detected {x.shape}! "
+                "This function only accepts SINGLE sample inputs [T, A, C]. "
+                "Please loop over your batch externally."
+            )
+        
+        # Variables for restoring shape later
+        assets_dim = 1
+        channels_dim = 1
+        
+        # Handle Batch Dimension
+        if x.ndim == 3: # Case: [T, A, C] e.g., [64, 14, 1]
+            t, a, c = x.shape
+            assets_dim = a
+            channels_dim = c
+            # Flatten Assets & Channels -> [1, T, A*C] (Add fake batch=1)
+            x_internal = x.reshape(1, t, a * c)
+            
+        elif x.ndim == 2: # Case: [T, C]
+            t, c = x.shape
+            channels_dim = c
+            # [1, T, C] (Add fake batch=1)
+            x_internal = x.unsqueeze(0)
+        else:
+            raise ValueError(f"Invalid shape {x.shape}. Expected [T, A, C] or [T, C].")
 
+
+        expected_dim = self.model.input_proj.weight.shape[1]
+        if x_internal.shape[-1] != expected_dim:
+            raise ValueError(
+                f"Model expects input dim {expected_dim}, but after flattening got {x_internal.shape[-1]}. "
+                f"Input shape was {x.shape}."
+            )
+            
+        if extend and steps > 0:
+            b, t, d = x_internal.shape
+            dummy = torch.zeros((b, steps, d), device=self.device)
+            x_internal = torch.cat([x_internal, dummy], dim=1) # [1, T+steps, D]
+            
         # Create Mask
-        mask = self._create_mask(x, steps_to_predict)
+        context_size = x_internal.shape[1] - steps
+        
+        mask = torch.zeros_like(x_internal)
+        mask[:, -context_size:, :] = 1 # Mask the future part
+        mask[:, context_size:, :] = 0
 
         # Call DDPM inpainting
-        logger.info(f"Simulating... (Masking last {steps_to_predict} steps)")
-        x_filled = self.diffusion.sample_inpainting(self.model, x, mask)
+        logger.info(f"Simulating... (Masking last {steps} steps)")
+        with torch.no_grad():
+            x_filled = self.diffusion.sample_inpainting(self.model, x_internal, mask)
 
-        # Ensure known part is exact
-        if steps_to_predict > 0:
-            x_filled[:, :-steps_to_predict, :] = x[:, :-steps_to_predict, :]
+        # Restore Known Context (Ensure the past didn't change)
+        input_len = x.shape[0] # Original T
+        x_filled[:, :input_len, :] = x_internal[:, :input_len, :]
 
+        # Remove Fake Batch
+        x_out = x_filled.squeeze(0)
+        
+        # Reshape back to [T_new, A, C] if input was 3D
+        if x.ndim == 3:
+            t_new = x_out.shape[0]
+            x_out = x_out.reshape(t_new, assets_dim, channels_dim)
 
-        # Return original shape
-        if original_shape is not None:
-            x_filled = x_filled.reshape(original_shape)
-
-        return x_filled.cpu().numpy()
+        return x_out.cpu().numpy()
 
     def _save_checkpoint_logic(self, epoch, train_loss, val_loss, best_val_loss, save_dir):
         # Save Best
