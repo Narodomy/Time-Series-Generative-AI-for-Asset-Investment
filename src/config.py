@@ -33,12 +33,15 @@ class DDPMConfig:
     d_model: int = 128
     n_heads: int = 4
     n_layers: int = 4
-    max_t: int = 64 * 2
+    max_t: int = 128 * 2
 
 @dataclass
 class TrainConfig:
-    batch_size: int = 32
-    epochs: int = 100
+    batch_size: int = 8
+    window_size: int = 128
+    steps_to_sim: int = 12
+    num_sims: int = 10000
+    epochs: int = 1000
     device: torch.device = "cuda" if torch.cuda.is_available() else "cpu"
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig) # optim.AdamW
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig) # optim.lr_scheduler.CosineAnnealingLR

@@ -7,8 +7,8 @@ from utils import read_equity
 
 logger = logging.getLogger(__name__)
 
-log_ret_key = "(Log_Returns)"
-simple_ret_key = "(Returns)"
+log_ret_key = "Log_Returns"
+simple_ret_key = "Returns"
 
 class Asset:
     def __init__(self, symbol: str, data: pd.DataFrame, device: torch.device= torch.device("cuda")):
@@ -67,10 +67,10 @@ class Asset:
     
             if log:
                 # Log Return: ln(Pt / Pt-1)
-                self.data[f"{col} {log_ret_key}"] = np.log(self.data[col]).diff()
+                self.data[f"{col}_{log_ret_key}"] = np.log(self.data[col]).diff()
             else:
                 # Simple Return: (Pt - Pt-1) / Pt-1
-                self.data[f"{col} {simple_ret_key}"] = self.data[col].pct_change()
+                self.data[f"{col}_{simple_ret_key}"] = self.data[col].pct_change()
     
         if not keep:
             self.data.drop(columns=columns, inplace=True)
@@ -142,7 +142,7 @@ class Asset:
         if device:
             tensor = tensor.to(device)
 
-        return tensor # Shape: [L, F]
+        return tensor # Shape: [T, C]
         
     def plot(self, column):
         """

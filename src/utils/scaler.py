@@ -5,69 +5,67 @@ from sklearn.base import BaseEstimator
 
 logger = logging.getLogger(__name__)
 
-class SklearnWrapper:
-    """
-    Wrapper class to use Scikit-Learn scalers with PyTorch Tensors.
-    It handles device movement (CPU/GPU) and reshaping automatically.
-    """
-    def __init__(self, sklearn_scaler: BaseEstimator):
-        """ e.g., MinMaxScaler(feature_range=(-1, 1)) """
-        self.scaler = sklearn_scaler
-        self.fitted = False
-        self.n_features = None
+def scale(part: np.ndarray, scaler) -> np.ndarray:
+    T, A, F = part.shape
+    part_2d = part.reshape(-1, F)
 
-    def fit(self, data: torch.Tensor):
-        """
-        Compute the mean/std/min/max to be used for later scaling.
-        Args:
-            data: Tensor of shape [B, L, N, F] or [..., F]
-        """
-        # Check num of Feature
-        self.n_features = data.shape[-1]
+    # print(f"2D Part: {part_2d.shape}")
 
-        # Transform Tensor (GPU/CPU) -> Numpy Array (CPU)
-        # Reshape to 2D [Total_Samples, F] because sklearn requires
-        flat_data = data.detach().cpu().numpy().reshape(-1, self.n_features)
-        
-        # let sklearn calc statistic
-        self.scaler.fit(flat_data)
-        self.fitted = True
-        
-        logger.debug(f"Scaler Fitted using: {self.scaler.__class__.__name__}")
+    scaled_part = scaler.transform(part_2d).reshape(T, A, F)
+    return scaled_part.astype(np.float32)
 
+def inverse_scale(scaled_part: np.ndarray, scaler) -> np.ndarray:
+    original_shape = scaled_part.shape
+    F = original_shape[-1]
 
-    def encode(self, data: torch.Tensor) -> torch.Tensor:
-        """ Norm data (e.g., Range data -> [-1, 1]) """
-        if not self.fitted:
-            raise ValueError("Scaler not fitted yet! Call .fit() first.")
-            
-        original_shape = data.shape
-        device = data.device
-        
-        # Transform to Numpy 2D
-        flat_data = data.detach().cpu().numpy().reshape(-1, data.shape[-1])
-        
-        # Transform
-        scaled_data = self.scaler.transform(flat_data)
-        
-        # Transform back to Tensor on original Device + return original Shape
-        scaled_tensor = torch.from_numpy(scaled_data).float().to(device)
-        return scaled_tensor.view(original_shape)
+    part_2d = scaled_part.reshape(-1, F)
+    
+    unscaled_2d = scaler.inverse_transform(part_2d)
+    return unscaled_2d.reshape(original_shape).astype(np.float32)
 
-    def decode(self, data: torch.Tensor) -> torch.Tensor:
-        """ DeNorm data (e.g., [-1, 1] -> data) """
-        if not self.fitted:
-            raise ValueError("Scaler not fitted yet! Call .fit() first.")
-            
-        original_shape = data.shape
-        device = data.device
+def inverse_scale_pair(x, x_cond, scaler):
+    if torch.is_tensor(x):      x = x.cpu().numpy()
+    if torch.is_tensor(x_cond): x_cond = x_cond.cpu().numpy()
         
-        # 1. Transform Numpy 2D
-        flat_data = data.detach().cpu().numpy().reshape(-1, data.shape[-1])
+    # Check Shape
+    assert x.shape[:-1] == x_cond.shape[:-1], "Dimensions mismatch!"
+    
+    # 2. Concatenate to recreate the feature set used during training
+    # [..., 1] + [..., 6] -> [..., 7]
+    full_features = np.concatenate([x, x_cond], axis=-1)
+    original_shape = full_features.shape
+    
+    # 3. Inverse Transform
+    flat_data = full_features.reshape(-1, original_shape[-1])
+    unscaled_flat = scaler.inverse_transform(flat_data)
+    unscaled_full = unscaled_flat.reshape(original_shape)
+    
+    # 4. Split back into x and x_cond
+    target_dim = x.shape[-1] # Normal = 1
+    
+    x_real      = unscaled_full[..., :target_dim]  # (Price)
+    x_cond_real = unscaled_full[..., target_dim:]  # (Condition)
+    
+    return x_real.astype(np.float32), x_cond_real.astype(np.float32)
+
+def inverse_scale_with_cond(x, x_cond, scaler):
+    if torch.is_tensor(x):
+        x = x.cpu().numpy()
+    if torch.is_tensor(x_cond):
+        x_cond = x_cond.cpu().numpy()
         
-        # 2. Inverse Transform value
-        original_data = self.scaler.inverse_transform(flat_data)
-        
-        # 3. Transform back to Tensor on original Device
-        original_tensor = torch.from_numpy(original_data).float().to(device)
-        return original_tensor.view(original_shape)
+    assert x.shape[:-1] == x_cond.shape[:-1], f"Shape Mismatch: x {x.shape} vs cond {x_cond.shape}"
+    
+    # [..., 1] + [..., 6] -> [..., 7]
+    full_features = np.concatenate([x, x_cond], axis=-1)
+
+    original_shape = full_features.shape
+    total_features = original_shape[-1]
+
+    flat_data = full_features.reshape(-1, total_features)
+
+    unscaled_flat = scaler.inverse_transform(flat_data)
+
+    unscaled_full = unscaled_flat.reshape(original_shape)
+    unscaled_price = unscaled_full[..., 0:1]
+    return unscaled_price.astype(np.float32)

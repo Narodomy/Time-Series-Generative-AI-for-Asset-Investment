@@ -50,10 +50,17 @@ class Basket:
         unique_cols = {col for asset in self.assets.values() for col in asset.data.columns}        
         return sorted(list(unique_cols))
 
+    def get_keyword_features(self, keyword) -> List[str]:
+        if not self.assets:
+            return []
+
+        cols = {col for asset in self.assets.values() for col in asset.data.columns if keyword.lower() in col.lower()}
+        return cols
+    
     def to_returns(self, features: list, log: bool, keep: bool=False):
         for symbol, asset in self.assets.items():
             asset.to_returns(log=log, columns=features, keep=keep)
-    
+        
     def add_symbol(self, symbol: str):
         if symbol not in self.symbols:
             self.symbols.append(symbol)

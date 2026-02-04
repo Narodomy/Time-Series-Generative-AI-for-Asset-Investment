@@ -1,8 +1,163 @@
-from typing import Dict, List
+import numpy as np
+import pandas as pd
+import logging
+import os
+from datetime import date
+from typing import Tuple, Optional, List, Union
+import matplotlib.pyplot as plt
+from pypfopt import EfficientFrontier, plotting
+from scipy.optimize import minimize, LinearConstraint, Bounds
+import quantstats as qs
+from utils import inverse_log_returns
+from utils.paths import REPORTS_DIR
+
+logger = logging.getLogger(__name__)
 
 class Portfolio:
-    def __init__(self, name: str, weights: Dict[str, float]):
-        """weights: such as {'AAPL': 0.5, 'TSLA': 0.5}"""
-        self.name = name
-        self.weights = weights
-        self.holdings = list(weights.keys())
+    def __init__(
+        self,
+        risk_free_rate: float,
+        weight_bounds: Optional[Tuple[float, float]]=(0, 1),
+        start_date: str  = str(date.today()),
+        save_dir:  str   = REPORTS_DIR
+    ):
+        self.risk_free_rate = risk_free_rate
+        self.weight_bounds = weight_bounds
+        self.save_dir = save_dir
+
+        os.makedirs(self.save_dir, exist_ok=True)
+        
+    def calc(self, returns: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        # Input: (Steps, Assets) -> Output: (Assets,)
+        mu = np.mean(returns, axis=0)
+
+        # Input: (Steps, Assets) -> Output: (Assets, Assets)
+        sigma = np.cov(returns, rowvar=False)
+
+        return mu, sigma
+
+    def calc_distribution(self, all_returns: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray]:
+        # Output: (Total_Steps, Assets)
+        combined_returns = np.vstack(all_returns)
+
+        mu_total, sigma_total = self.calc(combined_returns)
+        
+        return mu_total, sigma_total
+
+    def _optimize_weights_with_scipy(self, mu: np.ndarray, sigma: np.ndarray, risk_free_rate: Optional[float] = None) -> np.ndarray:
+        if risk_free_rate is None:
+            risk_free_rate = self.risk_free_rate
+        
+        n_assets = len(mu) # mu.shape[0]
+
+        def negative_sharpe(w):
+            ret = np.dot(w, mu) # expected return
+            vol = np.sqrt(np.dot(w.T, np.dot(sigma, w)))
+            sharpe = (ret - risk_free_rate) / (vol + 1e-9)
+            return -sharpe
+
+        bounds = Bounds(lb=self.weight_bounds[0], ub=self.weight_bounds[1])
+
+        # Linear Constraint (Sum of weights = 1)
+        A = np.ones(n_assets)
+        constraint = LinearConstraint(A, lb=1.0, ub=1.0)
+
+        init_guess = np.ones(n_assets) / n_assets
+
+        result = minimize(
+            negative_sharpe, 
+            init_guess, 
+            method='SLSQP',  # or 'trust-constr', 'BFGS'
+            bounds=bounds, 
+            constraints=constraint
+        )
+        
+        return result.x
+    
+    def optimize_weights(self, mu: np.ndarray, sigma: np.ndarray, risk_free_rate: Optional[float] = None, scipy:bool = False) -> np.ndarray:
+        if scipy:
+            weights_array = self._optimize_weights_with_scipy(mu, sigma)
+        else:
+            if risk_free_rate is None:
+                risk_free_rate = self.risk_free_rate
+            
+            # EfficientFrontier
+            ef = EfficientFrontier(mu, sigma, weight_bounds=self.weight_bounds)
+            
+            # ef.add_objective(objective_functions.L2_reg, gamma=0.1)
+            
+            # Maximize Sharpe Ratio
+            ef.max_sharpe(risk_free_rate=risk_free_rate)
+    
+            # Clean Weights
+            cleaned_weights = ef.clean_weights()
+                
+            weights_array = np.array(list(cleaned_weights.values()))
+
+        # Output: weights (N,)    
+        return weights_array
+    
+    def back_test(
+        self,
+        weights:           np.ndarray,
+        returns:           np.ndarray,
+        weights_benchmark: Optional[np.ndarray] = None,
+        dates:             Optional[pd.DatetimeIndex] = None,
+        is_saved:          bool = False,
+        is_log_return:     bool = True,
+        file_name: str   = f"Portfolio_Report_{str(date.today())}"
+    ) -> pd.DataFrame:
+        # weights: [Assets], returns: [Obs, Assets]
+        # R_p = w1*r1 + w2*r2 + ...
+        save_path = os.path.join(self.save_dir, file_name)
+    
+        if dates is None:
+            N_obs, N_assets = returns.shape
+            dates = pd.date_range(start=self.start_date, periods=N_obs, freq='D')
+        
+        ret_portfolio = inverse_log_returns(np.dot(returns, weights)) if is_log_return else np.dot(returns, weights)
+        portfolio_series = pd.Series(ret_portfolio, index=dates)
+
+        logger.debug(f"Max Log Return: {np.max(ret_portfolio):.4f}")
+        logger.debug(f"Min Log Return: {np.min(ret_portfolio):.4f}")
+
+        
+        if weights_benchmark is not None:
+            ret_benchmark = inverse_log_returns(np.dot(returns, weights_benchmark)) if is_log_return else np.dot(returns, weights_benchmark)
+            benchmark_series = pd.Series(ret_benchmark, index=dates)
+            logger.debug(f"Max Log Return Benchmark: {np.max(ret_benchmark):.4f}")
+            logger.debug(f"Min Log Return Benchmark: {np.min(ret_benchmark):.4f}")
+        else:
+            benchmark_series = 'SPY'
+        
+        print("Generating QuantStats Report...")
+        if is_saved:
+            qs.reports.html(portfolio_series, benchmark=benchmark_series, output=f"{save_path}.html", title='GenAI Portfolio Backtest', rf=self.risk_free_rate)
+            print(f"Report saved to {save_path}")
+        
+        metrics = qs.reports.metrics(portfolio_series, mode='full', display=False)
+        return metrics
+
+    def plot_ef(self, mu: np.ndarray, sigma: np.ndarray):
+        ef = EfficientFrontier(mu, sigma, weight_bounds=self.weight_bounds)
+        
+        # Setup Plot
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        # Draw Frontier
+        plotting.plot_efficient_frontier(ef, ax=ax, show_assets=True)
+
+        # Find Max Sharpe (Red Star)
+        ef_max = EfficientFrontier(mu, sigma, weight_bounds=self.weight_bounds)
+        ef_max.max_sharpe(risk_free_rate=self.risk_free_rate)
+        ret_tangent, std_tangent, _ = ef_max.portfolio_performance()
+        
+        # Draw Red Star
+        ax.scatter(std_tangent, ret_tangent, marker="*", s=300, c="r", label="Max Sharpe Portfolio")
+
+        ax.set_title(f"Efficient Frontier (Rf={self.risk_free_rate})")
+        ax.set_xlabel("Volatility (Risk)")
+        ax.set_ylabel("Expected Return")
+        ax.legend()
+        plt.grid(True, alpha=0.3)
+        plt.show()

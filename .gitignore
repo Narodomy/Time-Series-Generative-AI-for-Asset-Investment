@@ -42,5 +42,6 @@ wheels/
 
 notebooks/trained_models/
 notebooks/results/
+notebooks/checkpoints/
 
 results/

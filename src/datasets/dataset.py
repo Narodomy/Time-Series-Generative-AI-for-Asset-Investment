@@ -2,54 +2,44 @@ import torch
 import numpy as np
 from torch.utils.data import Dataset, Subset, DataLoader
 from typing import Dict, List, Tuple
+from numpy.lib.stride_tricks import sliding_window_view
+
 
 class MarketDataset(Dataset):
-    def __init__(self, data_tensor: torch.Tensor, mode: str = 'exhaustive', device: torch.device = None):
-        """
-        Args:
-            data_tensor: [Total_Windows, L, N, F] -> [2660, 64, 10, 2]
-            mode: 'exhaustive' (Total = 2660*10) or 'random' (Total = 2660)
-        """
-        self.data = data_tensor
-        self.mode = mode
-        
-        if device:
-            self.data = self.data.to(device)
-            
-        self.n_windows = self.data.shape[0]
-        self.window_size = self.data.shape[1]
-        self.n_assets = self.data.shape[2]
-        self.n_features = self.data.shape[3]
+    def __init__(self, data: np.ndarray, window_size: int, target_idx: int = 3):
+        # [T, A, F]
+        # [Time, Assets, Features]
+        self.data = data
+        self.window_size = window_size
+        self.target_idx = target_idx
 
+        # [Num_Win, Assets, Features, Win_Size]
+        _windows = sliding_window_view(self.data, window_shape=window_size, axis=0)
+        
+        # [Num_Win, Win_Size, Asset, Feature]
+        # Win_Size means Time (T) so [Num_Win, Time, Assets, Features]
+        # From _windows shape = [0(Num_Win), 1(Asset), 2(Feature), 3(Win_Size)]
+        self.windows = _windows.transpose(0, 3, 1, 2)
+        
     def __len__(self):
-        if self.mode == 'exhaustive':
-            return self.n_windows * self.n_assets # N * (N assets)
-        else:
-            return self.n_windows
+        return self.windows.shape[0]
 
-    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        if self.mode == 'exhaustive':
-            window_idx = idx // self.n_assets
-            target_asset_idx = idx % self.n_assets
-        else:
-            window_idx = idx
-            target_asset_idx = torch.randint(0, self.n_assets, (1,)).item()
+    def __getitem__(self, idx: int):
+        window_data = self.windows[idx]
 
-        window_sample = self.data[window_idx] # Shape: [64, 10, 2]
+        # x shape: [T, A, 1] 
+        x = window_data[:, :, [self.target_idx]]
 
-        # Target 1 asset
-        target_data = window_sample[:, target_asset_idx, :] # Shape: [64, 2]
+        n_features = window_data.shape[-1]
+        all_indices = np.arange(n_features)
+        cond_indices = all_indices[all_indices != self.target_idx]
+
+        # x condition shape: [T, A, F_cond]
+        x_cond = window_data[:, :, cond_indices]
         
-        # Context N - 1 assets
-        all_indices = torch.arange(self.n_assets)
-        context_mask = (all_indices != target_asset_idx)
-        context_data = window_sample[:, context_mask, :] # Shape: [64, 9, 2]
-
         return {
-            "target": target_data,       
-            "context": context_data,     
-            "target_idx": torch.tensor(target_asset_idx),
-            "window_idx": torch.tensor(window_idx)
+            "x": x.astype(np.float32),       
+            "x_cond": x_cond.astype(np.float32),
         }
 
 

@@ -4,74 +4,77 @@ import torch.nn as nn
 from .modules import SinusoidalPositionEmbeddings
 
 class DiffusionTransformer(nn.Module):
-    def __init__(
-        self, 
-        features_in, 
-        d_model=128,    # Deep layers
-        nhead=4, 
-        num_layers=4, 
-        dropout=0.1, 
-        max_len=64     # Window Size (Max L)
+    def __init__(self, 
+        n_features: int,      
+        n_cond: int,          
+        window_size: int,     
+        d_model: int,
+        nhead: int,
+        num_layers: int,
+        dim_feedforward: int,
+        dropout: float
     ):
         super().__init__()
-        self.name = "DiffusionTransformer"
-        self.d_model = d_model
-        
-        # Input Projection: Transform original Feature (F) has size Model (d_model)
-        self.input_proj = nn.Linear(features_in, d_model)
-        
-        # Time Embedding (for t)
+
+        # Time (t)
         self.time_mlp = nn.Sequential(
             SinusoidalPositionEmbeddings(d_model),
             nn.Linear(d_model, d_model),
             nn.GELU(),
             nn.Linear(d_model, d_model),
         )
-        
-        # Positional Encoding (for Sequence)
-        # Parameter which can use both learnable, or Sinusoidal
-        self.pos_encoder = nn.Parameter(torch.zeros(1, max_len, d_model))
-        
-        # 4. Transformer Encoder
-        # batch_first=True  because data shape = [Batch, Length, Feature]
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model, 
-            nhead=nhead, 
-            dropout=dropout, 
-            batch_first=True,
-            activation="gelu",
-            norm_first=True    # Pre-Norm is stable for Deep Networks
-        )
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        
-        # 5. Output Block
-        self.final_norm = nn.LayerNorm(d_model) # Pre Normalize before Output
-        self.output_proj = nn.Linear(d_model, features_in)
 
-    def forward(self, x, t):
+        # Input Projection (Include Noise + Condition)
+        input_dim = n_features + n_cond
+        self.input_proj = nn.Linear(input_dim, d_model)
+
+        # Positional Encoding for Seq 1...W
+        self.pos_embedding = nn.Parameter(torch.randn(1, window_size, d_model))
+
+        # Transformer Backbone (Encoder Only)
+        # batch_first=True for input shape like this [Batch, Seq, Feature]
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead, 
+            dim_feedforward=dim_feedforward, 
+            dropout=dropout,
+            activation="gelu",
+            batch_first=True
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+
+        # Output Projection 
+        self.output_proj = nn.Linear(d_model, n_features)
+
+    def forward(self, x_t, t, x_cond):
         """
-        x shape: [Batch, Length, Features]
-        t shape: [Batch]
+        x_t:    [Batch, Window, Features]  <- Noise
+        t:      [Batch]                    <- Time Index
+        x_cond: [Batch, Window, Cond_Feats] <- Condition
         """
-        B, L, C = x.shape
-        
-        # Input
-        x_emb = self.input_proj(x)  # [B, L, d_model]
-        
-        # + Positional Encoding
-        x_emb = x_emb + self.pos_encoder[:, :L, :]
-        
-        # Time Process
-        t_emb = self.time_mlp(t)    # [B, d_model]
-        
-        # Add Time Embedding
-        # let t pluse every points in the Sequence for tell the context that "all time series has Noise at t"
-        x_emb = x_emb + t_emb[:, None, :] 
-        
+        # Time Embedding
+        # t_emb shape: [Batch, d_model]
+        t_emb = self.time_mlp(t)
+
+        # Input (Concatenation)
+        # x_input shape: [Batch, Window, Features + Cond_Feats]
+        x_input = torch.cat([x_t, x_cond], dim=-1)
+
+        # Project to d_model
+        # x shape: [Batch, Window, d_model]
+        x = self.input_proj(x_input)
+
+        # Include Time Embedding and Positional Embedding
+        # t_emb up size to Window (Broadcasting)
+        # [Batch, 1, d_model] + [1, Window, d_model]
+        x = x + t_emb.unsqueeze(1) + self.pos_embedding
+
         # Transformer
-        latent = self.transformer_encoder(x_emb) # [B, L, d_model]
+        # x shape: [Batch, Window, d_model]
+        x = self.transformer(x)
+
+        # Predicted Noise
+        # output shape: [Batch, Window, Features]
+        return self.output_proj(x)
         
-        latent = self.final_norm(latent)
-        output = self.output_proj(latent) # [B, L, F]
         
-        return output

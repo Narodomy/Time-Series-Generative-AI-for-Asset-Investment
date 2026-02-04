@@ -13,9 +13,10 @@ plotly==6.3.0
 # Stats & Finance
 statsmodels==0.14.5
 yfinance==0.2.65
-quantstats==0.0.77
+quantstats
 pyportfolioppt
 pandas-datareader
+ta-lib
 
 # Web & Utilities
 requests==2.32.5
