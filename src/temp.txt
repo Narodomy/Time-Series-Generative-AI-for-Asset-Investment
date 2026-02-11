@@ -1,0 +1,74 @@
+def create_feature_multiindex(df: pd.DataFrame, threshold: float = 0.005) -> pd.DataFrame:
+    processed_list = []
+
+    assets = df.columns.get_level_values(0).unique()
+    print(f"Starting feature generation for {len(assets)} assets...")
+
+    for asset in assets:
+        try:
+            df_asset = df.xs(key=asset, axis=1, level=0)
+            df_featured = create_feature(df_asset, threshold)
+            df_featured['Asset'] = asset
+            processed_list.append(df_featured)
+            
+        except Exception as e:
+            print(f"Error processing asset {asset}: {e}")
+            continue
+            
+    if not processed_list:
+        return pd.DataFrame() # Return empty if nothing processed
+
+    final_df = pd.concat(processed_list)
+    final_df = final_df.reset_index().set_index(['Date', 'Asset']).sort_index()
+    
+    return final_df
+    
+def create_feature(asset: pd.DataFrame, threshold: float = 0.005) -> pd.DataFrame:
+    df = asset.copy()
+    new_col = {Col: Col.lower() for Col in df.columns}
+    df.rename(columns=new_col, inplace=True)
+        
+    # Trend
+    df['oc'] = (df['close'] / df['open'] - 1.0)
+    df['gap'] = (df['open'] / df['close'].shift(1) - 1.0)
+    df['ret'] = np.log(df['close'] / df['close'].shift(1))
+    df['hc'] = (df['high'] / df['close'] - 1.0)
+    df['hl'] = (df['high'] / df['low'] - 1.0)
+    
+    # Bollinger Bands Logic (Manual calculation)
+    rolling_mean = df['close'].rolling(7).mean()
+    rolling_std = df['close'].rolling(7).std()
+    df['up'] = ((rolling_mean + rolling_std * 2) / df['close'] - 1.0)
+    df['lp'] = ((rolling_mean - rolling_std * 2) / df['close'] - 1.0)
+    
+    # Loop for multiple timeframes
+    for day in [5, 10, 15, 25]: 
+        df[f'pchg{day}'] = df['close'].pct_change(day)
+        df[f'vchg{day}'] = df['volume'].pct_change(day)
+        df[f'ret{day}'] = df['ret'].rolling(day).sum()
+        df[f'ma{day}'] = (df['close'] / df['close'].rolling(day).mean() - 1.0)  
+        df[f'vma{day}'] = (df['volume'] / df['volume'].rolling(day).mean() - 1.0) 
+        df[f'oc{day}'] = df['oc'].rolling(day).mean()
+        df[f'hc{day}'] = df['hc'].rolling(day).mean()
+        df[f'hl{day}'] = df['hl'].rolling(day).mean()
+        df[f'gap{day}'] = df['gap'].rolling(day).mean()
+        df[f'std{day}']= df['ret'].rolling(day).std()
+        
+    df['SMA_15'] = df['close'].rolling(window=15).mean()    
+    df['SMA_50'] = df['close'].rolling(window=50).mean()
+
+    # RSI
+    if len(df) > 14:
+        df['RSI'] = ta.RSI(df['close'], timeperiod=14)
+    else:
+        df['RSI'] = np.nan
+
+    # Distance from SMA
+    df['Dist_SMA15'] = (df['close'] - df['SMA_15']) / df['SMA_15']
+
+    # TARGET CREATION
+    df['Target_Return'] = df['close'].shift(-1) / df['close'] - 1
+    df['Signal'] = np.where(df['Target_Return'] > threshold, 1, 0)
+    
+    df.dropna(inplace=True)
+    return df

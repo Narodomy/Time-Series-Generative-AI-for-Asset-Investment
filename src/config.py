@@ -37,10 +37,10 @@ class DDPMConfig:
 
 @dataclass
 class TrainConfig:
-    batch_size: int = 8
-    window_size: int = 128
-    steps_to_sim: int = 12
-    num_sims: int = 10000
+    batch_size: int = 32
+    window_size: int = 64
+    steps_to_sim: int = 5
+    num_sims: int = 100
     epochs: int = 1000
     device: torch.device = "cuda" if torch.cuda.is_available() else "cpu"
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig) # optim.AdamW

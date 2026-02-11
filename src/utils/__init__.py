@@ -4,7 +4,9 @@ from .save_data import save_prices, save_prices_grouped, save_eq_fundamental, sa
 
 from .data_loader import read_equity
 from .scaler import scale, inverse_scale, inverse_scale_pair, inverse_scale_with_cond
-from .helper import inspect, inverse_log_returns
+from .helper import inspect, inverse_log_returns, plot_to_base64, save_as_html
+from .statistics import monte_carlo_statistic
+
 
 __version__ = "0.2.0"
 __all__ = [
@@ -19,5 +21,7 @@ __all__ = [
 
     # Helper
     "inspect",
-    "inverse_log_returns"
+    "inverse_log_returns",
+    "plot_to_base64",
+    "save_as_html"
 ]

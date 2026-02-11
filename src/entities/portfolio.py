@@ -9,7 +9,7 @@ from pypfopt import EfficientFrontier, plotting
 from scipy.optimize import minimize, LinearConstraint, Bounds
 import quantstats as qs
 from utils import inverse_log_returns
-from utils.paths import REPORTS_DIR
+from utils.paths import REPORTS_DIR, REPORTS_QS_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -19,14 +19,20 @@ class Portfolio:
         risk_free_rate: float,
         weight_bounds: Optional[Tuple[float, float]]=(0, 1),
         start_date: str  = str(date.today()),
-        save_dir:  str   = REPORTS_DIR
+        save_dir:  str   = REPORTS_QS_DIR,
+        is_daily: bool = False,
     ):
-        self.risk_free_rate = risk_free_rate
+        self.is_daily = is_daily
+        self._risk_free_rate = risk_free_rate
         self.weight_bounds = weight_bounds
         self.save_dir = save_dir
 
         os.makedirs(self.save_dir, exist_ok=True)
-        
+
+    @property
+    def risk_free_rate(self):
+        return self._risk_free_rate # / 252
+    
     def calc(self, returns: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         # Input: (Steps, Assets) -> Output: (Assets,)
         mu = np.mean(returns, axis=0)
@@ -105,15 +111,17 @@ class Portfolio:
         dates:             Optional[pd.DatetimeIndex] = None,
         is_saved:          bool = False,
         is_log_return:     bool = True,
-        file_name: str   = f"Portfolio_Report_{str(date.today())}"
+        filename: str   = f"Portfolio_Report_{str(date.today())}"
     ) -> pd.DataFrame:
         # weights: [Assets], returns: [Obs, Assets]
         # R_p = w1*r1 + w2*r2 + ...
-        save_path = os.path.join(self.save_dir, file_name)
+        save_path = os.path.join(self.save_dir, filename)
     
         if dates is None:
             N_obs, N_assets = returns.shape
             dates = pd.date_range(start=self.start_date, periods=N_obs, freq='D')
+
+        logger.debug(f"Returns: {returns.shape}, Weights: {weights.shape}")
         
         ret_portfolio = inverse_log_returns(np.dot(returns, weights)) if is_log_return else np.dot(returns, weights)
         portfolio_series = pd.Series(ret_portfolio, index=dates)
@@ -149,7 +157,7 @@ class Portfolio:
 
         # Find Max Sharpe (Red Star)
         ef_max = EfficientFrontier(mu, sigma, weight_bounds=self.weight_bounds)
-        ef_max.max_sharpe(risk_free_rate=self.risk_free_rate)
+        ef_max.max_sharpe(risk_free_rate=self.risk_free_rate if not self.is_daily else self.risk_free_rate * 252)
         ret_tangent, std_tangent, _ = ef_max.portfolio_performance()
         
         # Draw Red Star
