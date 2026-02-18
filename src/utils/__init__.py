@@ -3,9 +3,9 @@ from .visualization import plot_comparison, plot_time_series, plot_distribution,
 from .save_data import save_prices, save_prices_grouped, save_eq_fundamental, save_org_economic
 
 from .data_loader import read_equity
-from .scaler import scale, inverse_scale, inverse_scale_pair, inverse_scale_with_cond
+from .scaler import inverse_transform
 from .helper import inspect, inverse_log_returns, plot_to_base64, save_as_html
-from .statistics import monte_carlo_statistic
+from .statistics import monte_carlo_statistic, calc_expected_returns, calc_covariance, calc_volatility
 
 
 __version__ = "0.2.0"
@@ -14,14 +14,17 @@ __all__ = [
     "read_equity",
 
     # Scaler
-    "scale",
     "inverse_scale",
-    "inverse_scale_pair",
-    "inverse_scale_with_cond",
 
     # Helper
     "inspect",
     "inverse_log_returns",
     "plot_to_base64",
-    "save_as_html"
+    "save_as_html",
+
+    # Statistics
+    "monte_carlo_statistic",
+    "calc_expected_returns", 
+    "calc_covariance",
+    "calc_volatility",
 ]

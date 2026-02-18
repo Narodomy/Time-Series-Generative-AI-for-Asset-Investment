@@ -129,6 +129,51 @@ class Diffusion(nn.Module):
         return x
 
     # --- Inpainting Process ---
+    # @torch.no_grad()
+    # def inpainting_sampler(self, x: Tensor, cond: Tensor, mask: Tensor) -> Tensor:
+    #     """
+    #     Sampling with Inpainting (Replacement Method)
+        
+    #     Args:
+    #         x: The full target data (Known + Unknown parts) 
+    #                         Shape: [B, W, A, F_target]
+    #         cond: Condition features (Clean, e.g., Volume, Open) 
+    #                 Shape: [B, W, A, F_cond]
+    #         mask: Binary mask (1=Keep Known/Ground Truth, 0=Inpaint/Generate)
+    #               Shape: [B, W, A, F_target]
+    #     """
+    #     B = x.shape[0]
+    #     device = x.device
+        
+    #     # 1. Start from Pure Noise (x_T)
+    #     x_t = torch.randn_like(x)
+        
+    #     # Loop backwards from T-1 to 0
+    #     for i in tqdm(reversed(range(0, self.timesteps)), desc="Inpainting", total=self.timesteps, leave=False):
+    #         # Current t tensor
+    #         t = torch.full((B,), i, device=device, dtype=torch.long)
+            
+    #         # A. Predict x_{t-1} for the WHOLE sequence (Model's guess)
+    #         x_t_minus_1_pred = self.p_sample(x_t, t, i, cond)
+            
+    #         # B. Prepare x_{t-1} for the KNOWN part
+    #         if i > 0:
+    #             # If not the last step, we need to add noise to the ground truth
+    #             # so it matches the noise level of step t-1
+    #             t_next = torch.full((B,), i - 1, device=device, dtype=torch.long)
+    #             x_t_minus_1_known = self.q_sample(x, t_next) 
+    #         else:
+    #             # At the last step (t=0), the known part is just the clean ground truth
+    #             x_t_minus_1_known = x
+
+    #         # C. Replacement Step (Combine Known & Predicted)
+    #         # mask: 1 for Known, 0 for Unknown
+    #         x_t = (mask * x_t_minus_1_known) + ((1 - mask) * x_t_minus_1_pred)
+
+    #     # [B, C, L, A] shape
+    #     return x_t # Final Inpainted Result (x_0) 
+
+
     @torch.no_grad()
     def inpainting_sampler(self, x: Tensor, cond: Tensor, mask: Tensor) -> Tensor:
         """
@@ -156,18 +201,144 @@ class Diffusion(nn.Module):
             # A. Predict x_{t-1} for the WHOLE sequence (Model's guess)
             x_t_minus_1_pred = self.p_sample(x_t, t, i, cond)
             
+            # 🌟 FIX: ใส่สมอถ่วงไว้ ไม่ให้ Transformer พ่นค่าระเบิดเกิน +- 1.0 (Standard Normal)
+            x_t_minus_1_pred = torch.clamp(x_t_minus_1_pred, min=-10.0, max=10.0)
+            
             # B. Prepare x_{t-1} for the KNOWN part
             if i > 0:
-                # If not the last step, we need to add noise to the ground truth
-                # so it matches the noise level of step t-1
                 t_next = torch.full((B,), i - 1, device=device, dtype=torch.long)
                 x_t_minus_1_known = self.q_sample(x, t_next) 
             else:
-                # At the last step (t=0), the known part is just the clean ground truth
                 x_t_minus_1_known = x
 
-            # C. Replacement Step (Combine Known & Predicted)
-            # mask: 1 for Known, 0 for Unknown
+            # C. Replacement Step
             x_t = (mask * x_t_minus_1_known) + ((1 - mask) * x_t_minus_1_pred)
+
+        # [B, C, L, A] shape
+        return x_t # Final Inpainted Result (x_0) 
+
+
+
+    # @torch.no_grad()
+    # def inpainting_sampler(self, x: Tensor, cond: Tensor, mask: Tensor) -> Tensor:
+    #     """
+    #     Sampling with Inpainting (Replacement Method)
+        
+    #     Args:
+    #         x: The full target data (Known + Unknown parts) 
+    #                         Shape: [B, W, A, F_target]
+    #         cond: Condition features (Clean, e.g., Volume, Open) 
+    #                 Shape: [B, W, A, F_cond]
+    #         mask: Binary mask (1=Keep Known/Ground Truth, 0=Inpaint/Generate)
+    #               Shape: [B, W, A, F_target]
+    #     """
+    #     B = x.shape[0]
+    #     device = x.device
+        
+    #     # 1. Start from Pure Noise (x_T)
+    #     x_t = torch.randn_like(x)
+        
+    #     # Loop backwards from T-1 to 0
+    #     for i in tqdm(reversed(range(0, self.timesteps)), desc="Inpainting", total=self.timesteps, leave=False):
+    #         t = torch.full((B,), i, device=device, dtype=torch.long)
             
-        return x_t # Final Inpainted Result (x_0)
+    #         # A. Predict x_{t-1}
+    #         x_t_minus_1_pred = self.p_sample(x_t, t, i, cond)
+            
+    #         # 🌟 จุดที่ 1: Dynamic Clipping หรือ Safety Clamp
+    #         # ถ้า x_t_minus_1_pred คือตัวที่มี Noise การ Clip แน่นเกินไป ([-1,1]) จะทำให้ภาพดู "Burn" หรือ Contrast จัดเกินไป
+    #         # แนะนำให้ใช้ค่าที่เผื่อ Noise ไว้หน่อย เช่น [-2, 2] หรือใช้ [-10, 10] แบบเดิมก็ได้เพื่อความปลอดภัย
+    #         x_t_minus_1_pred = torch.clamp(x_t_minus_1_pred, min=-10.0, max=10.0)
+            
+    #         # B. Prepare Known Part
+    #         if i > 0:
+    #             t_next = torch.full((B,), i - 1, device=device, dtype=torch.long)
+    #             x_t_minus_1_known = self.q_sample(x, t_next) 
+    #         else:
+    #             x_t_minus_1_known = x # ขั้นตอนสุดท้ายใช้ของจริงเลย
+    
+    #         # C. Replacement Step
+    #         x_t = (mask * x_t_minus_1_known) + ((1 - mask) * x_t_minus_1_pred)
+    
+    #     # 🌟 จุดที่ 2: Final Output Clipping (สำคัญมาก)
+    #     # ก่อนส่งออกไปใช้งาน ต้องมั่นใจว่าค่าอยู่ใน Range [-1, 1] จริงๆ
+    #     x_t = torch.clamp(x_t, min=-1.0, max=1.0)
+    
+    #     return x_t
+
+    # # --- Inpainting Process (No Stitching Version) ---
+    # @torch.no_grad()
+    # def inpainting_sampler(self, x: Tensor, cond: Tensor, mask: Tensor) -> Tensor:
+    #     """
+    #     Sampling with 'Guide & Replace at the end' Method
+    #     (เหมาะสมที่สุดสำหรับ Transformer เพื่อป้องกันการเกิด Frankenstein Tensor)
+    #     """
+    #     B = x.shape[0]
+    #     device = x.device
+        
+    #     # 1. เริ่มต้นจาก Pure Noise (x_T)
+    #     x_t = torch.randn_like(x)
+        
+    #     # 2. วนลูป Denoise จาก T-1 ถึง 0 (ปล่อยให้โมเดล Gen แบบธรรมชาติ)
+    #     for i in tqdm(reversed(range(0, self.timesteps)), desc="Generating", total=self.timesteps, leave=False):
+    #         t = torch.full((B,), i, device=device, dtype=torch.long)
+            
+    #         # ให้โมเดลทำนาย step ก่อนหน้า (x_{t-1}) โดยมี cond คอยไกด์
+    #         x_t = self.p_sample(x_t, t, i, cond)
+            
+    #         # 🛡️ ใส่เบรก (Clamp) ป้องกันการสโนว์บอลของ Error เผื่อโมเดลสะบัด
+    #         # ปกติ Standard Normal จะแกว่งแค่ช่วง -3 ถึง 3 การคุมไว้ที่ +- 5 จะช่วยล็อกสเกลให้ปลอดภัย
+    #         x_t = torch.clamp(x_t, min=-10.0, max=10.0)
+
+    #     # 3. เย็บตะเข็บครั้งเดียวตอนจบ! (Final Replacement)
+    #     # ถึงตรงนี้ x_t คือ x_0 ที่ถูก Denoise จนใสปิ๊งแล้ว
+    #     # เราเอาข้อมูลอดีตของจริง (x) มาทับเฉพาะส่วนที่ Mask เป็น 1
+    #     x_final = (mask * x) + ((1 - mask) * x_t)
+
+    #     # [B, C, L, A] shape
+    #     return x_final
+
+
+        
+    
+    def create_lower_right_triangle_mask(self, x: torch.Tensor):
+        # param x shape: [Batch, Channel, Length, Assets]
+        B, C, L, A = x.shape
+        device = x.device
+        
+        # example: L=3, C=3
+        # 1 1 1
+        # 1 1 0
+        # 1 0 0
+        base_mask = self.process_lower_right_triangle(L, C).to(device)
+        
+        # Adjust Shape match x
+        # base_mask = [L, C] but x sort to [..., C, L, ...]
+        # Transpose [C, L] first
+        base_mask = base_mask.transpose(0, 1) # ได้ shape [C, L]
+        
+        # Broadcast
+        # เ[C, L] -> [1, C, L, 1]
+        final_mask = base_mask.reshape(1, C, L, 1)
+        
+        full_mask = final_mask.expand(B, -1, -1, A)
+            
+        return full_mask
+
+    def process_lower_right_triangle(self, length: int, feature: int):
+        ones = torch.ones(length, feature)
+        
+        # Lower Triangle
+        # 1 0 0
+        # 1 1 0
+        # 1 1 1
+        tril_mask = torch.tril(ones)
+        
+        # Flip Up-Down
+        # 1 1 1
+        # 1 1 0
+        # 1 0 0
+        
+        final_mask = torch.flip(tril_mask, dims=[0])
+        
+        return final_mask

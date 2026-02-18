@@ -40,7 +40,8 @@ class DiffusionTransformer(nn.Module):
         self.time_mlp = nn.Sequential(
             SinusoidalPositionEmbeddings(d_model),
             nn.Linear(d_model, d_model),
-            nn.GELU(),
+            # nn.GELU(),
+            nn.SiLU(),
             nn.Linear(d_model, d_model),
         )
 

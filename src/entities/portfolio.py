@@ -102,6 +102,60 @@ class Portfolio:
 
         # Output: weights (N,)    
         return weights_array
+
+
+    def balance(
+        self,
+        weights: np.ndarray,
+        returns: np.ndarray, 
+        rebalance_days: int,
+        is_log_return: bool = True
+    ) -> np.ndarray:
+        """
+        จำลองการเติบโตของพอร์ตโดยมีการ Rebalance ทุกๆ N วัน
+        คืนค่ากลับมาเป็น Daily Returns (ประเภทเดียวกับ input is_log_return)
+        """
+        # 1. แปลงเป็น Simple Return เพื่อคำนวณเงินจริง (Nav)
+        if is_log_return:
+            # สมมติ returns คือ log return -> แปลงเป็น simple
+            simple_returns = np.exp(returns) - 1
+        else:
+            simple_returns = returns
+
+        n_days, n_assets = simple_returns.shape
+        
+        # 2. จำลองเงินในพอร์ต
+        portfolio_value = np.zeros(n_days + 1) # +1 เพื่อเก็บวันเริ่มต้น
+        portfolio_value[0] = 1.0 # เริ่มต้นด้วยเงิน 1 หน่วย
+        
+        current_holdings = weights * portfolio_value[0] # กระจายเงินตาม weight
+
+        for i in range(n_days):
+            # คำนวณเงินที่โตขึ้นในแต่ละ Asset ของวันนี้
+            asset_growth = 1 + simple_returns[i]
+            current_holdings = current_holdings * asset_growth
+            
+            # รวมเงินทั้งหมด ณ สิ้นวัน
+            total_val = np.sum(current_holdings)
+            portfolio_value[i+1] = total_val
+            
+            # ตรวจสอบรอบ Rebalance
+            # เช่น rebalance_days=5, จะปรับพอร์ตในวันที่ 4, 9, 14... (index)
+            # เพื่อให้วันรุ่งขึ้น (5, 10, 15) เริ่มต้นด้วย weight ที่ถูกต้อง
+            if (i + 1) % rebalance_days == 0:
+                current_holdings = total_val * weights # ตบกลับเข้า Weight เป้าหมาย
+
+        # 3. คำนวณ Return รายวันจากมูลค่าพอร์ตที่โตขึ้น
+        # สูตร: (NAV วันนี้ / NAV เมื่อวาน) - 1
+        portfolio_nav_series = pd.Series(portfolio_value)
+        portfolio_daily_simple_returns = portfolio_nav_series.pct_change().dropna().values
+        
+        # 4. คืนค่าตาม format ที่รับมา (ถ้า input เป็น log ก็คืน log เพื่อให้เข้ากับ code เดิม)
+        if is_log_return:
+            return np.log(1 + portfolio_daily_simple_returns)
+        
+        return portfolio_daily_simple_returns
+
     
     def back_test(
         self,
@@ -109,6 +163,7 @@ class Portfolio:
         returns:           np.ndarray,
         weights_benchmark: Optional[np.ndarray] = None,
         dates:             Optional[pd.DatetimeIndex] = None,
+        rebalance_days:    int = 1 ,
         is_saved:          bool = False,
         is_log_return:     bool = True,
         filename: str   = f"Portfolio_Report_{str(date.today())}"
@@ -123,7 +178,20 @@ class Portfolio:
 
         logger.debug(f"Returns: {returns.shape}, Weights: {weights.shape}")
         
-        ret_portfolio = inverse_log_returns(np.dot(returns, weights)) if is_log_return else np.dot(returns, weights)
+        # ret_portfolio = inverse_log_returns(np.dot(returns, weights)) if is_log_return else np.dot(returns, weights)
+        # Add new for reblance port every n days!
+        # -------------------
+        ret_portfolio = self.balance(
+            weights=weights,
+            returns=returns,
+            rebalance_days=rebalance_days,
+            is_log_return=is_log_return
+        )
+        if is_log_return:
+            qs_returns = inverse_log_returns(ret_portfolio)
+        else:
+            qs_returns = ret_portfolio
+        # -------------------
         portfolio_series = pd.Series(ret_portfolio, index=dates)
 
         logger.debug(f"Max Log Return: {np.max(ret_portfolio):.4f}")

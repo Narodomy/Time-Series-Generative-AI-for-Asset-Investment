@@ -191,17 +191,20 @@ class Engine:
     # ------------------------------------------------------
     # Simulate
     # ------------------------------------------------------
-    def simulate(self, x: torch.Tensor, cond: torch.Tensor, steps: int):
+    @torch.no_grad()
+    def simulate(self, x: torch.Tensor, cond: torch.Tensor):
         B, C_target, L, A = x.shape
 
-        # X, Cond shapes: [B, C, L, A]
-        mask = torch.ones_like(x).to(self.device)
-        mask[:, :, -steps:, :] = 0
+        # # X, Cond shapes: [B, C, L, A]
+        # mask = torch.ones_like(x).to(self.device)
+        # mask[:, :, -steps:, :] = 0
+        mask = self.model.create_lower_right_triangle_mask(x)
 
-        # Inpainting
-        x_inpainted = self.model.inpainting_sampler(x=x, cond=cond, mask=mask)
+        self.model.eval()
+        # # Inpainting
+        x_inpainted = self.model.inpainting_sampler(x=x, cond=cond, mask=mask) # [B, C, L, A]
 
         sim_full = x_inpainted
-        sim_only = x_inpainted[:, :, -steps:, :]
+        sim_only = x_inpainted[:, 1:, -1:, :]
         
         return sim_full, sim_only

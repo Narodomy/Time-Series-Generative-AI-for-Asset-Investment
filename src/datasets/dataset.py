@@ -10,7 +10,9 @@ class MarketDataset(Dataset):
         date: np.ndarray,
         price: np.ndarray,
         window_size: int,
-        stride: int = 1
+        stride: int = 1,
+        normalize_window: bool = True,
+        eps: float = 1e-6
     ):
       
         self.x = x # [Length, Assets, Features]
@@ -19,6 +21,8 @@ class MarketDataset(Dataset):
         self.date = date # [Length]
         self.window_size = window_size
         self.stride = stride
+        self.normalize_window = normalize_window
+        self.eps = eps
         
         # Shape which we want: [Num_windows as Batchs, Features as Channels, Length, Assets]
        
@@ -48,9 +52,28 @@ class MarketDataset(Dataset):
         window_date = self.windows_date[idx].copy().astype(np.int64)
         window_price = self.windows_price[idx].copy().astype(np.float32)
 
+        x_mean = np.zeros_like(window_x)
+        x_std = np.ones_like(window_x)
+
+        # Per-Window Scaling
+        if self.normalize_window:
+            mean = np.mean(window_x, axis=1, keepdims=True)
+            std = np.std(window_x, axis=1, keepdims=True)
+
+            # Makesure that's std not equal 0
+            std = np.maximum(std, self.eps)
+            
+            # Scaling Equation: (x - mean) / std
+            window_x = (window_x - mean) / std
+
+            x_mean = mean
+            x_std = std
+        
         return {
             "x": window_x,       
             "cond": window_cond,
             "date": window_date,
             "price": window_price,
+            "x_mean": x_mean,      # For Inverse Transform
+            "x_std": x_std  # For Inverse Transform
         }

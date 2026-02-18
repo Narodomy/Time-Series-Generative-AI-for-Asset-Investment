@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 
 def monte_carlo_statistic(log_returns: torch.Tensor, n_sims: int, steps: int, dt: float = 1.0):
     # log_returns shape: [Length, Assets]
@@ -26,3 +27,28 @@ def monte_carlo_statistic(log_returns: torch.Tensor, n_sims: int, steps: int, dt
     daily_log_returns = drift_term + diffusion_term
 
     return daily_log_returns # [N_sim, Steps, Assets]
+
+
+def calc_expected_returns(data: np.ndarray) -> np.ndarray:
+    """
+    คำนวณ Expected Return (Mu)
+    Input: data รูปแบบ (Steps, Assets)
+    Output: Mu รูปแบบ (Assets,)
+    """
+    return np.mean(data, axis=0)
+
+def calc_covariance(data: np.ndarray) -> np.ndarray:
+    """
+    คำนวณ Covariance Matrix (Sigma)
+    Input: data รูปแบบ (Steps, Assets)
+    Output: Sigma รูปแบบ (Assets, Assets)
+    """
+    return np.cov(data, rowvar=False)
+
+def calc_volatility(data: np.ndarray) -> np.ndarray:
+    """
+    คำนวณ Volatility (Standard Deviation) เผื่อใช้ในขั้นตอนอื่น
+    Input: data รูปแบบ (Steps, Assets)
+    Output: Volatility รูปแบบ (Assets,)
+    """
+    return np.std(data, axis=0)
