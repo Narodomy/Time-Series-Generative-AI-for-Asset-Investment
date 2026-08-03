@@ -16,7 +16,7 @@ description = "Time Series Generative AI for Asset Investment."
 authors = [
     { name = "Narodom Yatnimit", email = "narodomy@outlook.com" }
 ]
-license = "MIT"
+license = "Apache-2.0"
 readme = "README.md"
 requires-python = ">=3.11.0"
 dependencies = [
