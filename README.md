@@ -28,8 +28,19 @@ src/
 
 ## Installation
 
+1. (Recommended) Using Conda
+This method creates a complete, isolated environment using the exact package versions specified, including Python itself.
 ```bash
-pip install -e ".[data,viz,finance,utils]"
+conda env create -f tsgen.yml
+conda activate tsgen
+```
+2. Install the required packages
+```bash
+pip install -r requirements.txt
+```
+3. Install the project in editable mode
+```bash
+pip install -e .
 ```
 
 Optional dependency groups are defined in `pyproject.toml`. Add `dev` if working with notebooks (`pip install -e ".[dev]"`).
