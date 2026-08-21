@@ -1,0 +1,11 @@
+{
+  "d_model": 128,
+  "ff_mult": 4,
+  "n_heads": 16,
+  "n_layers": 4,
+  "dropout": 0.1,
+  "lr": 0.00036246867735406906,
+  "weight_decay": 2.636997308091531e-07,
+  "dim_feedforward": 512,
+  "best_val_loss": 0.19205930456519127
+}

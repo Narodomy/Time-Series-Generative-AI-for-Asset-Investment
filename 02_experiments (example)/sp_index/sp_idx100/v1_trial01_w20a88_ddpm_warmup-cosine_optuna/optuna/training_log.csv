@@ -1,0 +1,1 @@
+epoch,train_loss,val_loss,lr,grad_norm_mean,grad_norm_max

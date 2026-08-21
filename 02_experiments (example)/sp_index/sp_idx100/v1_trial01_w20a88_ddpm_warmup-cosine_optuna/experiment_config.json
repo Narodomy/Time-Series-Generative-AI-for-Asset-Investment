@@ -1,0 +1,98 @@
+{
+  "name": "v1_trial01",
+  "description": "baseline 88 assets — DDPM TransformerSkip: [Optuna: False, Training: False]",
+  "group_name": "sp_index",
+  "subgroup_name": "sp_idx100",
+  "random_seed": 72,
+  "device": "cuda:1",
+  "procesed_name": "trial01_w20_assets88_scaler-x_standard_scaler-condrobust",
+  "processed_group_name": "sp_index",
+  "processed_subgroup_name": "sp_idx100",
+  "skip_optuna": false,
+  "skip_training": false,
+  "model": {
+    "name": "ddpm_transformer",
+    "description": "DDPM Transformer — denoising diffusion with transformer backbone",
+    "num_layers": 3,
+    "num_attention_heads": 16,
+    "d_model": 256,
+    "dropout": 0.2,
+    "ff_mult": 2,
+    "timesteps": 1000,
+    "beta_start": 0.0001,
+    "beta_end": 0.02
+  },
+  "training": {
+    "num_epochs": 200,
+    "max_grad_norm": 1.0,
+    "use_clip_grad": true,
+    "save_checkpoint_freq": 10,
+    "batch_sizes": {
+      "train": 64,
+      "val": 64,
+      "test": 1
+    },
+    "optimizer": {
+      "name": "adam",
+      "lr": 0.00019083749359090823,
+      "weight_decay": 1.5227913712910045e-07,
+      "betas": [
+        0.9,
+        0.999
+      ],
+      "epsilon": 1e-08
+    },
+    "scheduler": {
+      "name": "warmup_cosine",
+      "warmup_epochs": 20,
+      "eta_min": 1e-06
+    },
+    "criterion": {
+      "name": "MSELoss"
+    }
+  },
+  "optuna": {
+    "n_trials": 100,
+    "epochs_per_trial": 30,
+    "min_resource": 5,
+    "max_resource": 30,
+    "reduction_factor": 3,
+    "suggest_d_model": [
+      128,
+      256,
+      512,
+      1024
+    ],
+    "suggest_ff_mult": [
+      2,
+      4
+    ],
+    "suggest_n_heads": [
+      4,
+      8,
+      16
+    ],
+    "suggest_n_layers": [
+      2,
+      4,
+      8,
+      12
+    ],
+    "suggest_dropout": [
+      0.1,
+      0.2,
+      0.3
+    ],
+    "suggest_lr": [
+      0.0001,
+      0.0005,
+      0.001
+    ],
+    "suggest_weight_decay": [
+      1e-07,
+      1e-06,
+      1e-05,
+      0.0001
+    ]
+  }
+}
